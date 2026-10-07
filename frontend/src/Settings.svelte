@@ -110,6 +110,12 @@
       </div>
     </fieldset>
 
+    <label class="check">
+      <input type="checkbox" bind:checked={cfg.allImages} />
+      Load remote images in all mail
+    </label>
+    <span class="hint muted check-hint">Off: images load only after you click Load images, or for senders you allow. Remote images can tell the sender when you opened a message.</span>
+
     <label>
       Save folder
       <span class="dir"><input bind:value={cfg.saveDir} /><button type="button" onclick={pickDir}>Choose…</button></span>
@@ -143,6 +149,7 @@
   .seg label:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 1px; }
   .seg input { position: absolute; opacity: 0; pointer-events: none; }
   .check { display: flex; gap: 8px; align-items: center; padding: 3px 0; }
+  .check-hint { margin-top: -16px; }
   .dir { display: flex; gap: 8px; align-items: center; font-weight: 400; }
   .dir input:first-child:not(.mins) { flex: 1; }
   .mins { width: 80px; }

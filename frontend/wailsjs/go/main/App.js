@@ -6,6 +6,10 @@ export function AddLabel(arg1, arg2) {
   return window['go']['main']['App']['AddLabel'](arg1, arg2);
 }
 
+export function AllowImages(arg1) {
+  return window['go']['main']['App']['AllowImages'](arg1);
+}
+
 export function Archive(arg1, arg2) {
   return window['go']['main']['App']['Archive'](arg1, arg2);
 }
@@ -38,8 +42,8 @@ export function Move(arg1, arg2, arg3) {
   return window['go']['main']['App']['Move'](arg1, arg2, arg3);
 }
 
-export function Open(arg1) {
-  return window['go']['main']['App']['Open'](arg1);
+export function Open(arg1, arg2) {
+  return window['go']['main']['App']['Open'](arg1, arg2);
 }
 
 export function SaveAttachment(arg1, arg2) {

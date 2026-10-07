@@ -298,8 +298,10 @@ func (a *App) raw(id int64) ([]byte, error) {
 	return b, err
 }
 
-// Open returns a message ready to render and marks it read, here and on the server.
-func (a *App) Open(id int64) (Msg, error) {
+// Open returns a message ready to render and marks it read, here and on the
+// server. Remote images load only when images is true, the sender is on the
+// allow list, or Settings says always; otherwise m.Blocked counts them.
+func (a *App) Open(id int64, images bool) (Msg, error) {
 	m, err := a.store.Get(id)
 	if err != nil {
 		return m, err
@@ -312,7 +314,12 @@ func (a *App) Open(id int64) (Msg, error) {
 	if err != nil {
 		return m, err
 	}
-	m.HTML = rewrite(p.HTML, proxied)
+	c := a.config()
+	src := proxied
+	if !images && !c.AllImages && !slices.Contains(c.ImageSenders, m.FromAddr) {
+		src = func(string) string { m.Blocked++; return "" }
+	}
+	m.HTML = rewrite(p.HTML, src)
 	m.Attachments = p.Attachments
 	if m.Labels, err = a.store.labelsOf(id); err != nil {
 		return m, err
@@ -322,6 +329,17 @@ func (a *App) Open(id int64) (Msg, error) {
 		a.SetFlag(id, `\Seen`, true)
 	}
 	return m, nil
+}
+
+// AllowImages always loads remote images in mail from sender.
+func (a *App) AllowImages(sender string) error {
+	a.mu.Lock()
+	if !slices.Contains(a.cfg.ImageSenders, sender) {
+		a.cfg.ImageSenders = append(a.cfg.ImageSenders, sender)
+	}
+	c := a.cfg
+	a.mu.Unlock()
+	return saveConfig(a.dir, c)
 }
 
 // SaveAttachment asks where to save attachment i of message id and writes it

@@ -310,14 +310,24 @@ func TestOpen(t *testing.T) {
 	f.add("INBOX", 1)
 	s := testStore(t)
 	s.syncLabel(&session{cl: f.dial()}, "INBOX", func(int) {})
-	a := &App{store: s, dial: func() (*imapclient.Client, error) { return f.dial(), nil }}
+	a := &App{store: s, dir: t.TempDir(), dial: func() (*imapclient.Client, error) { return f.dial(), nil }}
 
-	m, err := a.Open(1)
+	m, err := a.Open(1, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(m.HTML, "prices rose") || !m.Read || fmt.Sprint(m.Labels) != "[INBOX]" {
 		t.Fatalf("open: read=%v labels=%v html=%q", m.Read, m.Labels, m.HTML)
+	}
+	if strings.Contains(m.HTML, "/img?u=") || m.Blocked != 1 {
+		t.Errorf("remote image not held back: blocked=%d html=%q", m.Blocked, m.HTML)
+	}
+	if m, _ := a.Open(1, true); !strings.Contains(m.HTML, "/img?u=") || m.Blocked != 0 {
+		t.Errorf("Load images: blocked=%d", m.Blocked)
+	}
+	a.AllowImages("crew@morningbrew.com")
+	if m, _ := a.Open(1, false); !strings.Contains(m.HTML, "/img?u=") {
+		t.Errorf("allowed sender's images still blocked")
 	}
 	a.pushFlags() // what the background push does
 	if fl := f.flags("INBOX"); !slices.Contains(fl[0], imap.FlagSeen) {
@@ -328,7 +338,7 @@ func TestOpen(t *testing.T) {
 	}
 	a.dial = func() (*imapclient.Client, error) { return nil, fmt.Errorf("offline") }
 	a.dropConn()
-	if _, err := a.Open(1); err != nil {
+	if _, err := a.Open(1, false); err != nil {
 		t.Errorf("second open needed the server: %v", err)
 	}
 }

@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { SvelteSet } from 'svelte/reactivity'
   import {
-    GetConfig, GetSyncStatus, Folders, Senders, List, Open, SetFlags, SaveEmail, SaveAttachment, Sync, SetAppearance, SetReaderZoom,
+    GetConfig, GetSyncStatus, Folders, Senders, List, Open, AllowImages, SetFlags, SaveEmail, SaveAttachment, Sync, SetAppearance, SetReaderZoom,
     Archive, Trash, Spam, Move, AddLabel, DeleteForever, Undo,
   } from '../wailsjs/go/main/App'
   import { EventsOn } from '../wailsjs/runtime/runtime'
@@ -138,7 +138,7 @@
 
   async function open(m) {
     try {
-      msg = await Open(m.id)
+      msg = await Open(m.id, false)
     } catch (e) {
       // Still show the headers, so the message can be triaged while offline.
       msg = { ...$state.snapshot(m), html: '', labels: [], error: "Couldn't download this message. " + e }
@@ -269,6 +269,15 @@
       flash('Saved to ' + (await SaveEmail(msg.id)))
     } catch (e) {
       flash('Could not save: ' + e)
+    }
+  }
+
+  async function loadImages(always) {
+    try {
+      if (always) await AllowImages(msg.fromAddr)
+      msg = await Open(msg.id, true)
+    } catch (e) {
+      flash("Couldn't load images. " + e)
     }
   }
 
@@ -531,9 +540,9 @@
         <button class="muted" onclick={() => selected.clear()} title="Esc">Clear selection</button>
       </div>
     {:else if msg}
-      {#key msg.id}
+      {#key `${msg.id}:${msg.blocked}`}
         <Reader {msg} {onkey} zoom={readerZoom} onzoom={zoomReader}
-          {actions} onsave={save} onattach={saveAttachment}
+          {actions} onsave={save} onattach={saveAttachment} onimages={loadImages}
           chips={(msg.labels ?? []).filter((l) => l !== from).map(label)} />
       {/key}
     {:else}

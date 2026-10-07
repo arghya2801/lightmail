@@ -16,7 +16,7 @@ func mailbox(t *testing.T) (*fakeIMAP, *Store, *App) {
 		f.add("INBOX", i)
 	}
 	s := testStore(t)
-	a := &App{store: s, dial: func() (*imapclient.Client, error) { return f.dial(), nil }}
+	a := &App{store: s, dir: t.TempDir(), dial: func() (*imapclient.Client, error) { return f.dial(), nil }}
 	a.cfg.Labels = []string{"INBOX", "News", "Trash"}
 	s.setFolders([]Folder{{Name: "INBOX", Role: "inbox"}, {Name: "News"}, {Name: "Fin"},
 		{Name: "All Mail", Role: "all"}, {Name: "Trash", Role: "trash"}})

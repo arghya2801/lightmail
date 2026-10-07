@@ -4,6 +4,8 @@ import {main} from '../models';
 
 export function AddLabel(arg1:Array<number>,arg2:string):Promise<Array<main.Moved>>;
 
+export function AllowImages(arg1:string):Promise<void>;
+
 export function Archive(arg1:Array<number>,arg2:string):Promise<Array<main.Moved>>;
 
 export function ChooseSaveDir():Promise<string>;
@@ -20,7 +22,7 @@ export function List(arg1:main.Query):Promise<Array<main.Msg>>;
 
 export function Move(arg1:Array<number>,arg2:string,arg3:string):Promise<Array<main.Moved>>;
 
-export function Open(arg1:number):Promise<main.Msg>;
+export function Open(arg1:number,arg2:boolean):Promise<main.Msg>;
 
 export function SaveAttachment(arg1:number,arg2:number):Promise<string>;
 

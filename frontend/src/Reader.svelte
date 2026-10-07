@@ -2,7 +2,7 @@
   import { BrowserOpenURL } from '../wailsjs/runtime/runtime'
 
   // actions: [{ label, key, run }] for this message, built by App so the bulk panel shares them.
-  let { msg, actions, chips, onkey, zoom, onzoom, onsave, onattach } = $props()
+  let { msg, actions, chips, onkey, zoom, onzoom, onsave, onattach, onimages } = $props()
 
   const kb = (n) => (n < 1024 * 1024 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1024 / 1024).toFixed(1) + ' MB')
 
@@ -88,6 +88,13 @@
     </div>
   </header>
 
+  {#if msg.blocked}
+    <p class="blocked">
+      <span class="muted" title="Remote images can tell the sender when you opened a message.">Remote images are hidden.</span>
+      <button onclick={() => onimages(false)}>Load images</button>
+      <button onclick={() => onimages(true)}>Always for {msg.fromAddr}</button>
+    </p>
+  {/if}
   <div class="body" {onwheel}>
     {#if msg.error}
       <p class="error">{msg.error}</p>
@@ -118,6 +125,12 @@
   .right { margin-left: auto; display: flex; align-items: center; gap: 4px; }
   .zoom { font-size: 12px; font-variant-numeric: tabular-nums; }
   .body { position: relative; }
+  .blocked {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; padding: 8px 40px;
+    border-top: 1px solid var(--rule); font-size: 13px;
+  }
+  .blocked .muted { margin-right: auto; }
+  .blocked button { border: 1px solid var(--rule); }
   .error { margin: 0; padding: 16px 40px 24px; border-top: 1px solid var(--rule); color: var(--muted); }
   iframe { display: block; width: 100%; height: 150px; border: 0; border-top: 1px solid var(--rule); background: #fff; }
 </style>

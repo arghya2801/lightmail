@@ -25,6 +25,10 @@ type Config struct {
 	Density     string   `json:"density"`    // "comfortable" or "compact"
 	Scale       int      `json:"scale"`      // interface size in percent
 	ReaderZoom  int      `json:"readerZoom"` // message body zoom in percent
+	// Remote images are tracking beacons as often as pictures, so they load
+	// only for senders on this list, unless AllImages is set.
+	AllImages    bool     `json:"allImages"`
+	ImageSenders []string `json:"imageSenders"`
 }
 
 // dataDir picks where settings and the cache live: $LIGHTMAIL_DATA if set; a "data"
@@ -156,6 +160,7 @@ type Msg struct {
 	Text        string       `json:"-"`
 	Labels      []string     `json:"labels,omitempty"`      // filled by Open
 	Attachments []Attachment `json:"attachments,omitempty"` // filled by Open
+	Blocked     int          `json:"blocked,omitempty"`     // remote images held back by Open
 }
 
 type Folder struct {

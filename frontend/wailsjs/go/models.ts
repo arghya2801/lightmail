@@ -26,6 +26,8 @@ export namespace main {
 	    density: string;
 	    scale: number;
 	    readerZoom: number;
+	    allImages: boolean;
+	    imageSenders: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -42,6 +44,8 @@ export namespace main {
 	        this.density = source["density"];
 	        this.scale = source["scale"];
 	        this.readerZoom = source["readerZoom"];
+	        this.allImages = source["allImages"];
+	        this.imageSenders = source["imageSenders"];
 	    }
 	}
 	export class Count {
@@ -112,6 +116,7 @@ export namespace main {
 	    html?: string;
 	    labels?: string[];
 	    attachments?: Attachment[];
+	    blocked?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Msg(source);
@@ -130,6 +135,7 @@ export namespace main {
 	        this.html = source["html"];
 	        this.labels = source["labels"];
 	        this.attachments = this.convertValues(source["attachments"], Attachment);
+	        this.blocked = source["blocked"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
