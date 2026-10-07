@@ -10,7 +10,11 @@ export function Archive(arg1:Array<number>,arg2:string):Promise<Array<main.Moved
 
 export function ChooseSaveDir():Promise<string>;
 
+export function CreateLabel(arg1:string):Promise<void>;
+
 export function DeleteForever(arg1:Array<number>,arg2:string):Promise<void>;
+
+export function DeleteLabel(arg1:string):Promise<void>;
 
 export function Folders():Promise<Array<main.Folder>>;
 
@@ -23,6 +27,8 @@ export function List(arg1:main.Query):Promise<Array<main.Msg>>;
 export function Move(arg1:Array<number>,arg2:string,arg3:string):Promise<Array<main.Moved>>;
 
 export function Open(arg1:number,arg2:boolean):Promise<main.Msg>;
+
+export function RenameLabel(arg1:string,arg2:string):Promise<void>;
 
 export function SaveAttachment(arg1:number,arg2:number):Promise<string>;
 

@@ -18,8 +18,16 @@ export function ChooseSaveDir() {
   return window['go']['main']['App']['ChooseSaveDir']();
 }
 
+export function CreateLabel(arg1) {
+  return window['go']['main']['App']['CreateLabel'](arg1);
+}
+
 export function DeleteForever(arg1, arg2) {
   return window['go']['main']['App']['DeleteForever'](arg1, arg2);
+}
+
+export function DeleteLabel(arg1) {
+  return window['go']['main']['App']['DeleteLabel'](arg1);
 }
 
 export function Folders() {
@@ -44,6 +52,10 @@ export function Move(arg1, arg2, arg3) {
 
 export function Open(arg1, arg2) {
   return window['go']['main']['App']['Open'](arg1, arg2);
+}
+
+export function RenameLabel(arg1, arg2) {
+  return window['go']['main']['App']['RenameLabel'](arg1, arg2);
 }
 
 export function SaveAttachment(arg1, arg2) {

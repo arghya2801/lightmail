@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/emersion/go-imap/v2"
 )
@@ -267,4 +268,110 @@ func (a *App) SetFlags(ids []int64, flag string, value bool) error {
 	}
 	go a.pushFlags()
 	return nil
+}
+
+// userLabel refuses system folders (Inbox, Trash...) for create/rename/delete.
+func (a *App) userLabel(name string) error {
+	if name == "" {
+		return errors.New("label name is empty")
+	}
+	if a.store.roleFolder("inbox") == name || a.store.folderRole(name) != "" {
+		return fmt.Errorf("%s is a system folder", name)
+	}
+	return nil
+}
+
+// CreateLabel makes a label on the server and syncs it from now on.
+func (a *App) CreateLabel(name string) error {
+	if err := a.userLabel(name); err != nil {
+		return err
+	}
+	if err := a.imap(func(ss *session) error { return ss.cl.Create(name, nil).Wait() }); err != nil {
+		return err
+	}
+	if _, err := a.store.db.Exec(`INSERT OR IGNORE INTO folders VALUES(?, '')`, name); err != nil {
+		return err
+	}
+	return a.editLabels(func(ls []string) []string { return append(ls, name) })
+}
+
+// RenameLabel renames a label and, as Gmail does, the labels nested under it.
+func (a *App) RenameLabel(old, name string) error {
+	if err := a.userLabel(old); err != nil {
+		return err
+	}
+	if err := a.userLabel(name); err != nil {
+		return err
+	}
+	err := a.imap(func(ss *session) error {
+		if ss.sel == old || strings.HasPrefix(ss.sel, old+"/") {
+			ss.sel = "" // renaming the selected folder leaves the session unsure where it is
+		}
+		if err := ss.cl.Rename(old, name, nil).Wait(); err != nil {
+			return err
+		}
+		// Gmail renames nested labels too; a server that doesn't leaves them behind.
+		left, err := ss.cl.List("", old+"/*", nil).Collect()
+		if err != nil {
+			return err
+		}
+		for _, l := range left {
+			if err := ss.cl.Rename(l.Mailbox, name+strings.TrimPrefix(l.Mailbox, old), nil).Wait(); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if err := a.store.renameLabel(old, name); err != nil {
+		return err
+	}
+	return a.editLabels(func(ls []string) []string {
+		for i, l := range ls {
+			if l == old || strings.HasPrefix(l, old+"/") {
+				ls[i] = name + strings.TrimPrefix(l, old)
+			}
+		}
+		return ls
+	})
+}
+
+// DeleteLabel deletes a label. In Gmail the messages stay, in All Mail and their other labels.
+func (a *App) DeleteLabel(name string) error {
+	if err := a.userLabel(name); err != nil {
+		return err
+	}
+	err := a.imap(func(ss *session) error {
+		if ss.sel == name {
+			if err := ss.cl.Unselect().Wait(); err != nil {
+				return err
+			}
+			ss.sel = ""
+		}
+		return ss.cl.Delete(name).Wait()
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := a.store.db.Exec(`DELETE FROM folders WHERE name=?`, name); err != nil {
+		return err
+	}
+	if err := a.editLabels(func(ls []string) []string { return slices.DeleteFunc(ls, func(l string) bool { return l == name }) }); err != nil {
+		return err
+	}
+	return a.store.prune(a.config().Labels)
+}
+
+// editLabels changes the synced folder list and saves it.
+func (a *App) editLabels(f func([]string) []string) error {
+	a.mu.Lock()
+	a.cfg.Labels = f(slices.Clone(a.cfg.Labels))
+	c := a.cfg
+	a.mu.Unlock()
+	if a.dir == "" { // tests without a data folder
+		return nil
+	}
+	return saveConfig(a.dir, c)
 }

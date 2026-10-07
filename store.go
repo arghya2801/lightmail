@@ -464,3 +464,26 @@ func (s *Store) setFlag(id int64, flag string, value bool) error {
 	}
 	return tx.Commit()
 }
+
+func (s *Store) folderRole(name string) string {
+	var role string
+	s.db.QueryRow(`SELECT role FROM folders WHERE name=?`, name).Scan(&role)
+	return role
+}
+
+// renameLabel moves old, and everything nested under old/, to the new name.
+func (s *Store) renameLabel(old, name string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, t := range []struct{ table, col string }{{"message_labels", "label"}, {"label_state", "label"}, {"folders", "name"}} {
+		q := fmt.Sprintf(`UPDATE %[1]s SET %[2]s = ?2 || substr(%[2]s, length(?1)+1)
+			WHERE %[2]s = ?1 OR substr(%[2]s, 1, length(?1)+1) = ?1 || '/'`, t.table, t.col)
+		if _, err := tx.Exec(q, old, name); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}

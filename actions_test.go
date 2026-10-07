@@ -213,3 +213,46 @@ func TestWatchInbox(t *testing.T) {
 		t.Fatal("dropIdle didn't end the watch")
 	}
 }
+
+func TestLabels(t *testing.T) {
+	f, s, a := mailbox(t)
+	for _, l := range []string{"Work", "Work/Acme"} {
+		if err := a.CreateLabel(l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m0 := idOf(t, s, "m0@x")
+	if _, err := a.AddLabel([]int64{m0}, "Work/Acme"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.RenameLabel("Work", "Job"); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.sizes("Job", "Job/Acme"); got != "Job=0 Job/Acme=1 " {
+		t.Errorf("server after rename: %s", got)
+	}
+	if labels, _ := s.labelsOf(m0); fmt.Sprint(labels) != "[INBOX Job/Acme]" {
+		t.Errorf("cached labels after rename: %v", labels)
+	}
+	if fmt.Sprint(a.cfg.Labels) != "[INBOX News Trash Job Job/Acme]" {
+		t.Errorf("synced folders after rename: %v", a.cfg.Labels)
+	}
+	if err := s.syncLabel(&session{cl: f.dial()}, "Job/Acme", func(int) {}); err != nil || listed(s, "Job/Acme") != 1 {
+		t.Errorf("sync after rename: %v, %d listed", err, listed(s, "Job/Acme"))
+	}
+
+	if err := a.DeleteLabel("Job/Acme"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.cl.Select("Job/Acme", nil).Wait(); err == nil {
+		t.Error("label still on server")
+	}
+	if labels, _ := s.labelsOf(m0); fmt.Sprint(labels) != "[INBOX]" {
+		t.Errorf("cached labels after delete: %v", labels)
+	}
+	for _, bad := range []string{"INBOX", "Trash", ""} {
+		if err := a.DeleteLabel(bad); err == nil {
+			t.Errorf("deleted system folder %q", bad)
+		}
+	}
+}

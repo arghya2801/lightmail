@@ -3,7 +3,7 @@
   import { SvelteSet } from 'svelte/reactivity'
   import {
     GetConfig, GetSyncStatus, Folders, Senders, List, Open, AllowImages, SetFlags, SaveEmail, SaveAttachment, Sync, SetAppearance, SetReaderZoom,
-    Archive, Trash, Spam, Move, AddLabel, DeleteForever, Undo,
+    Archive, Trash, Spam, Move, AddLabel, DeleteForever, Undo, CreateLabel, RenameLabel, DeleteLabel,
   } from '../wailsjs/go/main/App'
   import { EventsOn } from '../wailsjs/runtime/runtime'
   import Reader from './Reader.svelte'
@@ -23,6 +23,7 @@
   let anchor = null // last picked row, for Shift+click ranges
   let picker = $state(null) // 'move' | 'label' while the folder picker is open
   let dropOn = $state('') // folder under a drag
+  let menu = $state(null) // { x, y, path, folder } while a label's right-click menu is open
   let sync = $state({ running: false, count: 0, error: '' })
   let syncedAt = $state(null)
   let toast = $state(null)
@@ -346,6 +347,40 @@
     else act(e.ctrlKey && !f.role ? 'label' : 'move', f.name, ids)
   }
 
+  // Labels: create, rename (nested ones follow, as in Gmail) and delete.
+  async function labelOp(what, fn) {
+    try {
+      await fn()
+      await counts()
+    } catch (e) {
+      flash(`Couldn't ${what}. ${e}`)
+    }
+  }
+  function openMenu(e, path, folder) {
+    e.preventDefault()
+    e.stopPropagation()
+    menu = { x: e.clientX, y: e.clientY, path, folder }
+  }
+  function newLabel(parent = '') {
+    const n = prompt(parent ? `New label inside ${parent}` : 'New label')?.trim()
+    if (n) labelOp('create the label', () => CreateLabel(parent ? `${parent}/${n}` : n))
+  }
+  function renameLabel(old) {
+    const n = prompt('Rename label', old)?.trim()
+    if (!n || n === old) return
+    labelOp('rename the label', async () => {
+      await RenameLabel(old, n)
+      if (q.label === old || q.label.startsWith(old + '/')) q.label = n + q.label.slice(old.length)
+    })
+  }
+  function deleteLabel(name) {
+    if (!confirm(`Delete the label ${name}? Its messages keep their other labels and stay in All Mail.`)) return
+    labelOp('delete the label', async () => {
+      await DeleteLabel(name)
+      if (q.label === name) go(roleFolder('inbox'))
+    })
+  }
+
   // Ctrl+Shift +/-/0 zooms the whole app; plain Ctrl +/-/0 (and Ctrl+wheel) only the message.
   const zoomKeys = { Equal: 1, NumpadAdd: 1, Minus: -1, NumpadSubtract: -1, Digit0: 0, Numpad0: 0 }
   const readerZooms = [50, 67, 80, 90, 100, 110, 125, 150, 175, 200]
@@ -369,6 +404,7 @@
       return e.preventDefault()
     }
     if (picker) return
+    if (menu && e.key === 'Escape') return (menu = null)
     if (e.target?.closest?.('input, textarea, select')) {
       if (e.key === 'Escape') e.target.blur()
       return
@@ -442,12 +478,12 @@
   })
 </script>
 
-<svelte:window onkeydown={onkey} />
+<svelte:window onkeydown={onkey} onclick={() => (menu = null)} />
 
 {#snippet folderRow(f, text)}
   <button class="row" class:on={view === 'reader' && q.label === f.name && !q.search} class:drop={dropOn === f.name} title={f.name}
     onclick={() => go(f.name)} ondragover={(e) => dragover(e, f)} ondragleave={() => dropOn === f.name && (dropOn = '')}
-    ondrop={(e) => dropped(e, f)}>
+    ondrop={(e) => dropped(e, f)} oncontextmenu={(e) => !f.role && openMenu(e, f.name, f)}>
     <span>{text}</span>{#if f.unread && !noCount.has(f.role)}<span class="n">{f.unread}</span>{/if}
   </button>
 {/snippet}
@@ -463,15 +499,18 @@
           <button class="row" class:on={view === 'reader' && !q.label && !q.search} onclick={() => go('')}><span>All mail</span></button>
         </div>
       {/if}
+      <div class="labels-head">
+        <span class="muted">Labels</span>
+        <button onclick={() => newLabel()} title="New label" aria-label="New label">+</button>
+      </div>
       {#if tree.length}
-        <div class="gap"></div>
         {#each tree as r (r.path)}
           <div class="branch tree" style:--depth={r.depth}>
             {#if r.kids}
               <button class="twisty" aria-expanded={!collapsed.has(r.path)} aria-label="{collapsed.has(r.path) ? 'Expand' : 'Collapse'} {r.path}"
                 class:shut={collapsed.has(r.path)} onclick={() => fold(r.path)}>›</button>
             {/if}
-            {#if r.folder}{@render folderRow(r.folder, r.text)}{:else}<span class="row virtual">{r.text}</span>{/if}
+            {#if r.folder}{@render folderRow(r.folder, r.text)}{:else}<span class="row virtual" role="presentation" oncontextmenu={(e) => openMenu(e, r.path, null)}>{r.text}</span>{/if}
           </div>
         {/each}
       {/if}
@@ -562,6 +601,16 @@
     </div>
   {/if}
 
+  {#if menu}
+    <div class="menu" role="menu" style:left="{menu.x}px" style:top="{menu.y}px">
+      <button role="menuitem" onclick={() => newLabel(menu.path)}>New label inside…</button>
+      {#if menu.folder}
+        <button role="menuitem" onclick={() => renameLabel(menu.path)}>Rename…</button>
+        <button role="menuitem" onclick={() => deleteLabel(menu.path)}>Delete label</button>
+      {/if}
+    </div>
+  {/if}
+
   <div class="dragchip" bind:this={chipEl} aria-hidden="true"></div>
 </div>
 
@@ -583,6 +632,14 @@
   .twisty { flex: none; width: 18px; padding: 0; margin-left: -18px; color: var(--muted); font-size: 15px; line-height: 1; transform: rotate(90deg); }
   .twisty.shut { transform: none; }
   .gap { height: 12px; }
+  .labels-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 4px 2px 10px; }
+  .labels-head button { padding: 0 6px; color: var(--muted); font-size: 16px; line-height: 1.2; }
+  .menu {
+    position: fixed; z-index: 15; display: flex; flex-direction: column; min-width: 180px; padding: 4px 0;
+    background: var(--paper); border: 1px solid var(--rule); border-radius: 6px;
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 16%, transparent);
+  }
+  .menu button { text-align: left; border-radius: 0; padding: 5px 14px; }
   .row {
     display: flex; justify-content: space-between; gap: 8px; width: 100%; min-width: 0;
     text-align: left; padding: var(--nav-py) 10px;
