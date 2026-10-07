@@ -30,16 +30,24 @@ type App struct {
 
 	statusMu sync.Mutex
 	status   SyncStatus // last one emitted
+
+	idleMu       sync.Mutex
+	idle         *imapclient.Client // the Inbox watch connection, closed to restart it
+	dialIdle     func(*imapclient.Options) (*imapclient.Client, error)
+	inboxChanged func() // what a change in the Inbox triggers; Sync, or a counter in tests
 }
 
 func NewApp(dir string, portable bool, store *Store) *App {
 	a := &App{dir: dir, store: store, cfg: loadConfig(dir, portable)}
-	a.dial = func() (*imapclient.Client, error) { return dial(a.config()) }
+	a.dial = func() (*imapclient.Client, error) { return dial(a.config(), clientOpts) }
+	a.dialIdle = func(o *imapclient.Options) (*imapclient.Client, error) { return dial(a.config(), o) }
+	a.inboxChanged = a.Sync
 	return a
 }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	go a.watchInbox()
 	go func() {
 		for {
 			a.Sync()
@@ -74,6 +82,7 @@ func (a *App) SaveConfig(c Config) error {
 	a.cfg = c
 	a.mu.Unlock()
 	a.dropConn() // the account may have changed
+	a.dropIdle()
 	return saveConfig(a.dir, c)
 }
 
@@ -154,6 +163,84 @@ func (a *App) dropConn() {
 	if a.conn != nil {
 		a.conn.cl.Close()
 		a.conn = nil
+	}
+}
+
+// watchInbox holds an IDLE connection on the Inbox and syncs as soon as the
+// server reports a change, so new mail arrives in seconds rather than at the
+// next poll. Other folders still sync on the timer.
+func (a *App) watchInbox() {
+	for {
+		if err := a.idleInbox(); err != nil {
+			log.Printf("inbox watch: %v", err)
+		}
+		time.Sleep(time.Minute) // offline, no account yet, or settings changed: try again soon
+	}
+}
+
+// idleInbox runs one IDLE session until the connection ends.
+func (a *App) idleInbox() error {
+	c := a.config()
+	inbox := a.store.roleFolder("inbox")
+	if c.Password == "" || inbox == "" || !slices.Contains(c.Labels, inbox) {
+		return nil
+	}
+	changed := make(chan struct{}, 1)
+	poke := func() {
+		select {
+		case changed <- struct{}{}:
+		default:
+		}
+	}
+	opts := *clientOpts
+	opts.UnilateralDataHandler = &imapclient.UnilateralDataHandler{
+		Expunge: func(uint32) { poke() },
+		Mailbox: func(d *imapclient.UnilateralDataMailbox) {
+			if d.NumMessages != nil {
+				poke()
+			}
+		},
+		Fetch: func(m *imapclient.FetchMessageData) { m.Collect(); poke() }, // read/star changed elsewhere
+	}
+	cl, err := a.dialIdle(&opts)
+	if err != nil {
+		return err
+	}
+	a.idleMu.Lock()
+	a.idle = cl
+	a.idleMu.Unlock()
+	defer cl.Close()
+	if _, err := cl.Select(inbox, &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
+		return err
+	}
+	for {
+		idle, err := cl.Idle()
+		if err != nil {
+			return err
+		}
+		ended := make(chan error, 1)
+		go func() { ended <- idle.Wait() }()
+		select {
+		case err := <-ended: // connection dropped or closed by dropIdle
+			return err
+		case <-changed:
+		}
+		if err := idle.Close(); err != nil {
+			return err
+		}
+		if err := <-ended; err != nil {
+			return err
+		}
+		a.inboxChanged()
+	}
+}
+
+func (a *App) dropIdle() {
+	a.idleMu.Lock()
+	defer a.idleMu.Unlock()
+	if a.idle != nil {
+		a.idle.Close()
+		a.idle = nil
 	}
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
@@ -178,5 +179,37 @@ func TestMoveOutOfAllMailCopies(t *testing.T) {
 	}
 	if listed(s, "All Mail") != 1 || listed(s, "News") != 1 {
 		t.Errorf("local All Mail %d, News %d", listed(s, "All Mail"), listed(s, "News"))
+	}
+}
+
+// TestWatchInbox: mail arriving in the Inbox (from another connection)
+// triggers a sync over IDLE; dropIdle ends the watch.
+func TestWatchInbox(t *testing.T) {
+	f, _, a := mailbox(t)
+	a.cfg.Password = "x"
+	a.dialIdle = func(o *imapclient.Options) (*imapclient.Client, error) {
+		cl, err := imapclient.DialInsecure(f.addr, o)
+		if err == nil {
+			err = cl.Login("me", "pw").Wait()
+		}
+		return cl, err
+	}
+	synced := make(chan struct{}, 10)
+	a.inboxChanged = func() { synced <- struct{}{} }
+	done := make(chan error, 1)
+	go func() { done <- a.idleInbox() }()
+
+	time.Sleep(300 * time.Millisecond) // let IDLE start
+	f.add("INBOX", 7)
+	select {
+	case <-synced:
+	case <-time.After(5 * time.Second):
+		t.Fatal("new Inbox mail didn't trigger a sync")
+	}
+	a.dropIdle()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("dropIdle didn't end the watch")
 	}
 }

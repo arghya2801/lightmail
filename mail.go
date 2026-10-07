@@ -27,11 +27,11 @@ import (
 
 var clientOpts = &imapclient.Options{WordDecoder: &mime.WordDecoder{CharsetReader: charset.Reader}}
 
-func dial(c Config) (*imapclient.Client, error) {
+func dial(c Config, opts *imapclient.Options) (*imapclient.Client, error) {
 	if c.User == "" || c.Password == "" {
 		return nil, errors.New("add your Gmail address and app password in Settings")
 	}
-	cl, err := imapclient.DialTLS(c.Host, clientOpts)
+	cl, err := imapclient.DialTLS(c.Host, opts)
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s: %w", c.Host, err)
 	}
