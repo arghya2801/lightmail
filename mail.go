@@ -232,11 +232,10 @@ func parseMsg(raw []byte) (*Msg, error) {
 	}
 	m.HTML = htmlBody
 	m.Text = htmlText(htmlBody)
-	m.Words = len(strings.Fields(m.Text))
 	return m, nil
 }
 
-// htmlText extracts visible text, used for search and reading time.
+// htmlText extracts visible text, used for search.
 func htmlText(s string) string {
 	z := html.NewTokenizer(strings.NewReader(s))
 	var b strings.Builder

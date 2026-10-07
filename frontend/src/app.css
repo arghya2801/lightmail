@@ -16,8 +16,6 @@
   --row-gap: 3px;
   --subj-size: 17px;
   --tools-p: 12px;
-  --mins-row: flex;
-  --mins-inline: none;
   --sheet-m: 24px;
   --head-p: 32px 40px 20px;
   --h1-size: 30px;
@@ -48,8 +46,6 @@
   --row-gap: 1px;
   --subj-size: 15px;
   --tools-p: 8px;
-  --mins-row: none;
-  --mins-inline: inline;
   --sheet-m: 10px;
   --head-p: 16px 24px 12px;
   --h1-size: 22px;
@@ -75,7 +71,7 @@ input, select, textarea {
 }
 ::selection { background: var(--mark); }
 
-/* The one loud thing: a marker stroke with uneven ends, shared by reader and highlights page. */
+/* A marker stroke with uneven ends. */
 .marker {
   background:
     linear-gradient(104deg, transparent 0.9%, var(--mark) 2.4%, var(--mark-edge) 5.8%, var(--mark) 93%, var(--mark) 96%, transparent 98%),

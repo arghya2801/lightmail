@@ -73,11 +73,11 @@
           {/each}
         </div>
       </div>
-      <span class="hint muted">Compact fits more issues on screen: narrower panes, tighter rows, reading time on the date line. Zoom scales the whole app; Ctrl+Shift+Plus / Minus / 0 work anywhere. Changes apply immediately.</span>
+      <span class="hint muted">Compact fits more mail on screen: narrower panes and tighter rows. Zoom scales the whole app; Ctrl+Shift+Plus / Minus / 0 work anywhere. Changes apply immediately.</span>
     </fieldset>
 
     {#if !cfg.password}
-      <p>Connect your Gmail account to start. The app reads the labels you pick. The only change it makes in Gmail is marking an issue read when you open it.</p>
+      <p>Connect your Gmail account to start. Lightmail syncs the labels you pick.</p>
     {/if}
 
     <label>Gmail address <input type="email" bind:value={cfg.user} required autocomplete="username" /></label>
@@ -92,7 +92,7 @@
     </label>
 
     <fieldset>
-      <legend>Labels to read</legend>
+      <legend>Labels to sync</legend>
       <div class="labels-tools">
         <button type="button" onclick={loadLabels} disabled={busy || !cfg.user || !cfg.password}>
           {busy ? 'Loading labels…' : serverLabels.length ? 'Reload labels' : 'Load labels from Gmail'}
@@ -110,9 +110,9 @@
     <label>
       Save folder
       <span class="dir"><input bind:value={cfg.saveDir} /><button type="button" onclick={pickDir}>Choose…</button></span>
-      <span class="hint muted">Saved issues and highlights.md go here.</span>
+      <span class="hint muted">Messages you save as HTML go here.</span>
     </label>
-    <label>Check for new issues every <span class="dir"><input class="mins" type="number" min="1" bind:value={cfg.syncMinutes} /> minutes</span></label>
+    <label>Check for new mail every <span class="dir"><input class="mins" type="number" min="1" bind:value={cfg.syncMinutes} /> minutes</span></label>
 
     <div><button class="primary" type="submit" disabled={!cfg.labels.length}>Save and sync</button></div>
   </form>

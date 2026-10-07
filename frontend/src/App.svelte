@@ -1,29 +1,27 @@
 <script>
   import { onMount } from 'svelte'
-  import { GetConfig, Labels, Senders, List, Open, SetRead, SetHidden, SaveEmail, Sync, SetAppearance, SetReaderZoom } from '../wailsjs/go/main/App'
+  import { GetConfig, Labels, Senders, List, Open, SetRead, SaveEmail, Sync, SetAppearance, SetReaderZoom } from '../wailsjs/go/main/App'
   import { EventsOn } from '../wailsjs/runtime/runtime'
   import Reader from './Reader.svelte'
-  import Highlights from './Highlights.svelte'
   import Settings, { zooms } from './Settings.svelte'
 
-  let view = $state('reader') // reader | highlights | settings
+  let view = $state('reader') // reader | settings
   let q = $state({ label: '', sender: '', search: '', sort: 'new' })
   let items = $state([])
   let more = true
   let labels = $state([])
   let senders = $state([])
   let senderFilter = $state('')
-  let issue = $state(null)
+  let msg = $state(null)
   let sync = $state({ running: false, count: 0, error: '' })
   let syncedAt = $state(null)
   let toast = $state(null)
-  let reader = $state()
   let searchEl = $state()
   let listEl = $state()
 
   const sorts = [
     ['new', 'Newest first'], ['old', 'Oldest first'], ['sender', 'Sender A–Z'],
-    ['unread', 'Unread first'], ['short', 'Shortest read'], ['long', 'Longest read'],
+    ['unread', 'Unread first'],
   ]
 
   const year = new Date().getFullYear()
@@ -31,7 +29,6 @@
     const d = new Date(s * 1000)
     return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', ...(d.getFullYear() !== year && { year: 'numeric' }) })
   }
-  const mins = (w) => Math.max(1, Math.round(w / 230))
   const short = (l) => l.split('/').pop()
 
   let visibleSenders = $derived(
@@ -69,7 +66,7 @@
   }
 
   async function open(m) {
-    issue = await Open(m.id)
+    msg = await Open(m.id)
     view = 'reader'
     if (!m.read) {
       m.read = true
@@ -78,7 +75,7 @@
   }
 
   function move(d) {
-    const i = items.findIndex((m) => m.id === issue?.id)
+    const i = items.findIndex((m) => m.id === msg?.id)
     const next = items[i + d] ?? (i < 0 ? items[0] : null)
     if (next) {
       open(next)
@@ -87,43 +84,26 @@
     if (more && i + d >= items.length - 5) load(false)
   }
 
-  async function save(fmt) {
-    if (!issue) return
+  async function save() {
+    if (!msg) return
     try {
-      flash('Saved to ' + (await SaveEmail(issue.id, fmt)))
+      flash('Saved to ' + (await SaveEmail(msg.id)))
     } catch (e) {
       flash('Could not save: ' + e)
     }
   }
 
   async function toggleRead() {
-    if (!issue) return
-    const m = items.find((x) => x.id === issue.id)
-    const read = !(m?.read ?? issue.read)
-    await SetRead(issue.id, read)
+    if (!msg) return
+    const m = items.find((x) => x.id === msg.id)
+    const read = !(m?.read ?? msg.read)
+    await SetRead(msg.id, read)
     if (m) m.read = read
-    issue.read = read
+    msg.read = read
     counts()
   }
 
-  async function done() {
-    if (!issue) return
-    const id = issue.id
-    const i = items.findIndex((m) => m.id === id)
-    await SetHidden(id, true)
-    const next = items[i + 1] ?? items[i - 1]
-    items = items.filter((m) => m.id !== id)
-    if (next) open(next)
-    else issue = null
-    counts()
-    flash('Marked done.', 'Undo', async () => {
-      await SetHidden(id, false)
-      load(true)
-      counts()
-    })
-  }
-
-  // Ctrl+Shift +/-/0 zooms the whole app; plain Ctrl +/-/0 (and Ctrl+wheel) only the newsletter.
+  // Ctrl+Shift +/-/0 zooms the whole app; plain Ctrl +/-/0 (and Ctrl+wheel) only the message.
   const zoomKeys = { Equal: 1, NumpadAdd: 1, Minus: -1, NumpadSubtract: -1, Digit0: 0, Numpad0: 0 }
   const readerZooms = [50, 67, 80, 90, 100, 110, 125, 150, 175, 200]
   const step = (levels, cur, d) => {
@@ -141,7 +121,7 @@
   function onkey(e) {
     if ((e.ctrlKey || e.metaKey) && !e.altKey && e.code in zoomKeys) {
       if (e.shiftKey) zoomApp(zoomKeys[e.code])
-      else if (view === 'reader' && issue) zoomReader(zoomKeys[e.code])
+      else if (view === 'reader' && msg) zoomReader(zoomKeys[e.code])
       else return
       return e.preventDefault()
     }
@@ -152,7 +132,6 @@
     if (e.ctrlKey || e.metaKey || e.altKey) return
     if (gPending) {
       gPending = false
-      if (e.key === 'h') view = 'highlights'
       if (e.key === 'i') view = 'reader'
       if (e.key === 's') view = 'settings'
       return
@@ -160,15 +139,11 @@
     const keys = {
       j: () => move(1),
       k: () => move(-1),
-      h: () => reader?.highlight(),
-      s: () => save('html'),
-      S: () => save('md'),
-      e: done,
-      u: toggleRead,
+      S: save,
+      U: toggleRead,
       r: Sync,
       '/': () => searchEl?.focus(),
       g: () => (gPending = true),
-      Escape: () => reader?.escape(),
     }
     if (keys[e.key]) {
       e.preventDefault()
@@ -212,7 +187,7 @@
 <div class="app" class:wide={view !== 'reader'}>
   <nav class="side">
     <button class="row" class:on={view === 'reader' && !q.label} onclick={() => ((q.label = ''), (q.sender = ''), (view = 'reader'))}>
-      <span>All newsletters</span>
+      <span>All mail</span>
     </button>
     {#each labels as l (l.key)}
       <button class="row" class:on={view === 'reader' && q.label === l.key} title={l.key}
@@ -235,7 +210,6 @@
     </div>
 
     <div class="foot">
-      <button class="row" class:on={view === 'highlights'} onclick={() => (view = 'highlights')} title="g h">Highlights</button>
       <button class="row" class:on={view === 'settings'} onclick={() => (view = 'settings')} title="g s">Settings</button>
       <div class="sync">
         <span class="muted" role="status">
@@ -252,7 +226,7 @@
   {#if view === 'reader'}
     <section class="list">
       <div class="tools">
-        <input type="search" placeholder="Search" aria-label="Search newsletters" bind:this={searchEl} bind:value={q.search} />
+        <input type="search" placeholder="Search" aria-label="Search mail" bind:this={searchEl} bind:value={q.search} />
         <select bind:value={q.sort} aria-label="Sort">
           {#each sorts as [v, label]}<option value={v}>{label}</option>{/each}
         </select>
@@ -262,16 +236,15 @@
         if (more && t.scrollTop + t.clientHeight > t.scrollHeight - 400) { more = false; load(false) }
       }}>
         {#each items as m (m.id)}
-          <button class="item" class:unread={!m.read} class:sel={issue?.id === m.id} data-id={m.id} onclick={() => open(m)}>
-            <span class="meta"><span class="from">{m.fromName}</span><span>{fmtDate(m.date)}<span class="inline-mins">, {mins(m.words)} min</span></span></span>
+          <button class="item" class:unread={!m.read} class:sel={msg?.id === m.id} data-id={m.id} onclick={() => open(m)}>
+            <span class="meta"><span class="from">{m.fromName}</span><span>{fmtDate(m.date)}</span></span>
             <span class="subj">{m.subject || '(no subject)'}</span>
-            <span class="meta mins">{mins(m.words)} min read</span>
           </button>
         {:else}
           <p class="empty muted">
             {#if q.search || q.sender}Nothing matches. Clear the search or pick another sender.
-            {:else if sync.running}Fetching your newsletters…
-            {:else}No newsletters yet. Pick your labels in Settings, then sync.{/if}
+            {:else if sync.running}Fetching your mail…
+            {:else}No mail here yet. Pick your labels in Settings, then sync.{/if}
           </p>
         {/each}
       </div>
@@ -281,14 +254,12 @@
   <main class="main">
     {#if view === 'settings'}
       <Settings onsaved={() => { view = 'reader'; Sync() }} {look} onlook={setLook} />
-    {:else if view === 'highlights'}
-      <Highlights onopen={(id) => open({ id, read: true })} />
-    {:else if issue}
-      {#key issue.id}
-        <Reader bind:this={reader} {issue} {onkey} zoom={readerZoom} onzoom={zoomReader} onsave={save} ontoggleread={toggleRead} ondone={done} />
+    {:else if msg}
+      {#key msg.id}
+        <Reader {msg} {onkey} zoom={readerZoom} onzoom={zoomReader} onsave={save} ontoggleread={toggleRead} />
       {/key}
     {:else}
-      <p class="empty muted">Pick an issue on the left, or press j.</p>
+      <p class="empty muted">Pick a message on the left, or press j.</p>
     {/if}
   </main>
 
@@ -338,8 +309,6 @@
   .item:hover { background: color-mix(in srgb, var(--paper) 50%, var(--chrome)); }
   .item.sel { background: var(--paper); }
   .meta { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); }
-  .meta.mins { display: var(--mins-row); }
-  .inline-mins { display: var(--mins-inline); }
   .from { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .subj {
     font: 400 var(--subj-size)/1.3 var(--serif); font-optical-sizing: auto;

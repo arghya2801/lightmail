@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"fmt"
 	"net"
 	"net/http"
@@ -38,8 +37,8 @@ func TestPipeline(t *testing.T) {
 	if m.Subject != "Café markets" || m.FromAddr != "crew@morningbrew.com" || m.FromName != "Morning Brew" || m.MessageID != "abc@mb" {
 		t.Fatalf("headers: %+v", m)
 	}
-	if m.Text != "Café prices rose." || m.Words != 3 {
-		t.Fatalf("text %q words %d", m.Text, m.Words)
+	if m.Text != "Café prices rose." {
+		t.Fatalf("text %q", m.Text)
 	}
 
 	out := rewrite(m.HTML, proxied)
@@ -77,16 +76,6 @@ func TestPipeline(t *testing.T) {
 	}
 	if lbl, _ := s.Labels(); len(lbl) != 2 || lbl[0].Unread != 1 {
 		t.Errorf("labels %+v", lbl)
-	}
-
-	s.AddHighlight(Highlight{MessageID: 1, Text: "Café prices\nrose."})
-	h2, _ := s.AddHighlight(Highlight{MessageID: 1, Text: "rose"})
-	s.SetNote(h2.ID, "why?")
-	hs, _ := s.Highlights(0)
-	md := highlightsMarkdown(hs)
-	want := "# Highlights\n\n## Café markets\n\n*Morning Brew, 2026-09-21*\n\n> Café prices\n> rose.\n\n> rose\n\nwhy?\n"
-	if md != want {
-		t.Errorf("markdown:\n%q\nwant\n%q", md, want)
 	}
 }
 
@@ -256,52 +245,4 @@ func TestOpenQueuesSeen(t *testing.T) {
 	if m, _ := s.Get(1); fmt.Sprint(ids) != "[1]" || !m.Read {
 		t.Errorf("queued %v, read %v", ids, m.Read)
 	}
-}
-
-// TestMigrateV1 opens a cache written by the first schema and checks nothing is lost.
-func TestMigrateV1(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "old.db")
-	old, _ := sql.Open("sqlite", path)
-	for _, q := range []string{
-		`CREATE TABLE messages(id INTEGER PRIMARY KEY, message_id TEXT UNIQUE NOT NULL, from_name TEXT NOT NULL, from_addr TEXT NOT NULL, subject TEXT NOT NULL, date INTEGER NOT NULL, html TEXT NOT NULL, text TEXT NOT NULL, words INTEGER NOT NULL, read INTEGER NOT NULL DEFAULT 0, hidden INTEGER NOT NULL DEFAULT 0)`,
-		`CREATE INDEX messages_date ON messages(date)`,
-		`CREATE TABLE message_labels(message_id INTEGER NOT NULL REFERENCES messages(id), label TEXT NOT NULL, PRIMARY KEY(message_id, label))`,
-		`CREATE TABLE highlights(id INTEGER PRIMARY KEY, message_id INTEGER NOT NULL REFERENCES messages(id), text TEXT NOT NULL, prefix TEXT NOT NULL, suffix TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL)`,
-		`CREATE VIRTUAL TABLE fts USING fts5(subject, from_name, text, content='messages', content_rowid='id')`,
-		`INSERT INTO messages VALUES(7,'<a@b>','Brew','b@x','Coffee prices',100,'<p>Arabica beans surged</p>','Arabica beans surged',3,1,0)`,
-		`INSERT INTO fts(rowid,subject,from_name,text) VALUES(7,'Coffee prices','Brew','Arabica beans surged')`,
-		`INSERT INTO message_labels VALUES(7,'News')`,
-		`INSERT INTO highlights VALUES(1,7,'beans','Arabica ','','keep',5)`,
-	} {
-		if _, err := old.Exec(q); err != nil {
-			t.Fatal(q, err)
-		}
-	}
-	old.Close()
-
-	s, err := openStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.db.Close()
-	m, err := s.Get(7)
-	if err != nil || m.HTML != "<p>Arabica beans surged</p>" || !m.Read {
-		t.Fatalf("Get after migrate: %+v %v", m, err)
-	}
-	if l, _ := s.List(Query{Label: "News", Search: "arabica"}); len(l) != 1 {
-		t.Errorf("label+search after migrate: %d", len(l))
-	}
-	if hs, _ := s.Highlights(7); len(hs) != 1 || hs[0].Note != "keep" {
-		t.Errorf("highlights after migrate: %+v", hs)
-	}
-	var fk int
-	s.db.QueryRow(`SELECT count(*) FROM pragma_foreign_key_check`).Scan(&fk)
-	if fk != 0 {
-		t.Errorf("%d foreign key violations", fk)
-	}
-	s.db.Close()
-	if s, err = openStore(path); err != nil { // second open is a no-op
-		t.Fatal(err)
-	}
-	s.db.Close()
 }
