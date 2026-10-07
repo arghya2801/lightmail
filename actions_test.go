@@ -161,3 +161,22 @@ func TestSetFlags(t *testing.T) {
 		t.Errorf("server flags %s", got)
 	}
 }
+
+// TestMoveOutOfAllMailCopies: filing from All Mail adds a label instead of
+// moving, because in Gmail a move out of All Mail deletes the message.
+func TestMoveOutOfAllMailCopies(t *testing.T) {
+	f, s, a := mailbox(t)
+	f.add("All Mail", 9)
+	a.cfg.Labels = append(a.cfg.Labels, "All Mail")
+	s.syncLabel(&session{cl: f.dial()}, "All Mail", func(int) {})
+	moved, err := a.Move([]int64{idOf(t, s, "m9@x")}, "All Mail", "News")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.sizes("All Mail", "News"); got != "All Mail=1 News=1 " || moved[0].From != "" {
+		t.Errorf("server %s, moved %+v", got, moved)
+	}
+	if listed(s, "All Mail") != 1 || listed(s, "News") != 1 {
+		t.Errorf("local All Mail %d, News %d", listed(s, "All Mail"), listed(s, "News"))
+	}
+}

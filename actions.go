@@ -121,24 +121,28 @@ func (a *App) move(ids []int64, from, to string, copy bool) ([]Moved, error) {
 		return nil, err
 	}
 	synced := a.config().Labels
+	all, trash, junk := a.store.roleFolder("all"), a.store.roleFolder("trash"), a.store.roleFolder("junk")
 	var out []Moved
 	err = a.imap(func(ss *session) error {
 		for src, locs := range groups {
 			if src == to {
 				continue
 			}
+			// Out of All Mail, Gmail treats a move as delete. Filing elsewhere
+			// means adding a label, so copy; Trash and Spam really are moves.
+			cp := copy || (src != "" && src == all && to != trash && to != junk)
 			uids := make([]imap.UID, len(locs))
 			for i, l := range locs {
 				uids[i] = imap.UID(l.uid)
 			}
-			dest, err := transfer(ss, src, uids, to, copy)
+			dest, err := transfer(ss, src, uids, to, cp)
 			if err != nil {
 				return err
 			}
 			for _, l := range locs {
 				m := Moved{ID: l.id, From: src, To: to, UID: uint32(dest[imap.UID(l.uid)])}
 				left := src
-				if copy {
+				if cp {
 					m.From, left = "", ""
 				}
 				if err := a.store.relabel(l.id, left, to, m.UID, slices.Contains(synced, to)); err != nil {
