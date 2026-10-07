@@ -1,49 +1,57 @@
-# Newsletters
+# Lightmail
 
-A small desktop reader for the newsletters your Gmail filters already sort into labels. It is not an email client: it reads the labels you pick, and the only change it makes in your mailbox is marking an issue read in Gmail when you open it. "Mark unread", "done" and highlights stay in the app.
+A small, fast Gmail client for Windows, for reading and sorting mail rather than writing it. It syncs the folders and labels you pick over IMAP, keeps headers in a local SQLite cache, and downloads a message body the first time you open it. You can archive, delete, report spam, star, mark read, move messages between labels (drag and drop works) and manage labels. Changes go to Gmail straight away. There is no compose or reply; use Gmail for that.
 
 ## Install
 
 Two builds, same app:
 
-- **Installer** (`Newsletters-amd64-installer.exe`): installs for your user only (no admin prompt) into `%LOCALAPPDATA%\Programs\Newsletters`, adds Start menu and desktop shortcuts, and appears in Settings → Apps for uninstalling. Uninstalling keeps your settings, cache and highlights.
-- **Portable** (`Newsletters-portable.zip`): unzip anywhere, including a USB stick, and run `Newsletters.exe`. The `portable` file next to it keeps everything (settings, cache, highlights, saved issues) in a `data` folder beside the exe. Delete `portable` to use `%APPDATA%` instead.
+- **Installer** (`Lightmail-amd64-installer.exe`) installs for your user only, with no admin prompt, into `%LOCALAPPDATA%\Programs\Lightmail`. It adds Start menu and desktop shortcuts and shows up in Settings → Apps for uninstalling. Uninstalling keeps your settings and cache.
+- **Portable** (`Lightmail-portable.zip`): unzip anywhere, including a USB stick, and run `Lightmail.exe`. The `portable` file next to it keeps everything in a `data` folder beside the exe. Delete `portable` to use `%APPDATA%` instead.
 
-Both need the WebView2 runtime, which ships with Windows 11; the installer adds it if it's missing.
+Both need the WebView2 runtime, which ships with Windows 11. The installer adds it if it's missing.
 
 ## Setup
 
 1. Turn on 2-step verification for your Google account, then create an app password at <https://myaccount.google.com/apppasswords>.
-2. Make sure IMAP is enabled in Gmail (Settings → Forwarding and POP/IMAP).
-3. Open the app, enter your Gmail address and the app password, click **Load labels from Gmail**, tick your newsletter labels, then **Save and sync**.
+2. Make sure IMAP is on in Gmail (Settings → Forwarding and POP/IMAP).
+3. Open Lightmail, enter your Gmail address and the app password, and click **Load labels from Gmail**. Every folder is ticked except All Mail and Important, which only repeat messages that live elsewhere. Untick what you don't want, then **Save and sync**.
 
-The first sync pulls the full history of those labels. After that it only fetches new mail, on launch and every 15 minutes (configurable).
+The first sync fetches headers only, so even a large mailbox lists in a minute or so. After that the Inbox updates within seconds of new mail arriving (IMAP IDLE), and other folders sync on launch and every 15 minutes (configurable).
 
 ## Using it
 
+Click a message to open it. Ctrl+click, Shift+click, the checkbox that appears on hover, or `x` select several; the toolbar then acts on all of them. Drag messages onto a label in the sidebar to move them there, or hold Ctrl while dropping to add the label and leave them where they are. Dropping on Trash deletes, on Spam reports spam, on All Mail archives. Every move and delete can be undone from the toast that follows.
+
+Right-click a label to rename it, delete it, or create one inside it. The + next to Labels creates a top-level one.
+
 | Key | Action |
 | --- | --- |
-| `j` / `k` | Next / previous issue |
-| `/` | Search (subject, sender, body) |
-| `h` | Highlight selected text (or click the Highlight button) |
-| `s` / `Shift+S` | Save issue as HTML / Markdown |
-| `u` | Toggle read |
-| `e` | Done (hides it; Undo in the toast) |
+| `j` / `k` | Next / previous message |
+| `x` | Select or deselect the open message |
+| `Ctrl+A` / `Esc` | Select all loaded messages / clear the selection |
+| `e` | Archive |
+| `#` or `Delete` | Delete (in Trash or Spam: delete forever) |
+| `!` | Report spam (in Spam: not spam) |
+| `v` / `l` | Move to… / Add label… |
+| `s` | Star or unstar |
+| `Shift+I` / `Shift+U` | Mark read / unread |
+| `Shift+S` | Save the message as HTML |
+| `/` | Search all mail (subject and sender; body text for messages you've opened) |
 | `r` | Sync now |
-| `g h` / `g i` / `g s` | Highlights / issues / settings |
-| `Ctrl+Plus` / `Minus` / `0`, `Ctrl`+scroll | Zoom the newsletter only (remembered; click the % to reset) |
-| `Ctrl+Shift+Plus` / `Minus` / `0` | Zoom the whole app in / out / reset |
-| `Esc` | Close note, leave a text field |
+| `g i` / `g s` | Inbox / Settings |
+| `Ctrl+Plus` / `Minus` / `0`, `Ctrl`+scroll | Zoom the message only (remembered; click the % to reset) |
+| `Ctrl+Shift+Plus` / `Minus` / `0` | Zoom the whole app |
 
-Settings → Appearance switches between Comfortable and Compact density (narrower panes, tighter rows) and sets the app zoom from 80% to 150%; changes apply immediately.
+What the actions do in Gmail: archive removes the Inbox label, and the message stays in All Mail. Delete moves it to Trash, which Gmail empties after 30 days. Moving between labels swaps one label for the other. Filing a message from All Mail adds the label instead, because in Gmail a move out of All Mail deletes.
 
-Click a highlight to add a note or remove it. The Highlights page exports everything to `highlights.md` in your save folder, grouped by issue, or copies it to the clipboard.
+Remote images stay hidden until you click **Load images** or **Always for this sender**, because images double as read receipts. Settings can turn this off. Attachments appear under the message header; click one to save it. Inline images in the message itself always show. Scripts in mail never run.
 
-Saved HTML files have their images embedded, so they open offline. Images in the reader are fetched by the app and cached on disk, and 1×1 tracking pixels are stripped. Scripts in emails never run.
+Settings → Appearance switches between Comfortable (two-line rows) and Compact (one line per message), and sets the app zoom from 80% to 150%.
 
 ## Where things live
 
-Installed: `%APPDATA%\newsletter-reader\`. Portable: `data\` next to the exe. Either holds `config.json` (includes the app password in plain text), `cache.db` (SQLite), `img\` (image cache). Delete `cache.db` to resync from scratch. Set `NLR_DATA` to a folder to run with a separate profile.
+Installed: `%APPDATA%\lightmail\`. Portable: `data\` next to the exe. Either holds `config.json` (includes the app password in plain text), `cache.db` (SQLite: headers, opened bodies, pending read/star changes) and `img\` (image cache). The cache holds nothing Gmail doesn't. Delete `cache.db` to resync from scratch. Set `LIGHTMAIL_DATA` to a folder to run with a separate profile.
 
 ## Development
 
@@ -51,9 +59,9 @@ Requires Go 1.26+, Node 20+, and the Wails CLI (`go install github.com/wailsapp/
 
 ```sh
 wails dev            # live reload
-wails build          # build/bin/Newsletters.exe
+wails build          # build/bin/Lightmail.exe
 ./build.ps1          # installer + portable zip in build/bin (needs NSIS: winget install NSIS.NSIS)
-go test ./...        # parsing, HTML rewrite, store, export, sync against an in-memory IMAP server
+go test ./...        # parsing, sync, reconcile, every action, IDLE, against an in-memory IMAP server
 ```
 
-Known limits, marked `ponytail:` in the code: messages deleted or relabelled in Gmail stay in the local cache; the image cache never evicts; inline `cid:` images are not shown.
+Known limits, marked `ponytail:` in the code: one SQLite connection serialises all queries; an action made while a sync is running can look undone until the next sync; attachments save but don't open in place; the image cache never evicts.
