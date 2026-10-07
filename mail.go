@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,17 +18,19 @@ import (
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
-	_ "github.com/emersion/go-message/charset"
+	"github.com/emersion/go-message/charset"
 	"github.com/emersion/go-message/mail"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
 )
 
+var clientOpts = &imapclient.Options{WordDecoder: &mime.WordDecoder{CharsetReader: charset.Reader}}
+
 func dial(c Config) (*imapclient.Client, error) {
 	if c.User == "" || c.Password == "" {
 		return nil, errors.New("add your Gmail address and app password in Settings")
 	}
-	cl, err := imapclient.DialTLS(c.Host, nil)
+	cl, err := imapclient.DialTLS(c.Host, clientOpts)
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s: %w", c.Host, err)
 	}
@@ -40,85 +42,127 @@ func dial(c Config) (*imapclient.Client, error) {
 	return cl, nil
 }
 
-func serverLabels(c Config) ([]string, error) {
-	cl, err := dial(c)
+// session is an IMAP connection that remembers which folder is selected.
+type session struct {
+	cl  *imapclient.Client
+	sel string
+}
+
+func (s *session) open(box string) error {
+	if s.sel == box {
+		return nil
+	}
+	s.sel = ""
+	if _, err := s.cl.Select(box, nil).Wait(); err != nil {
+		return fmt.Errorf("open folder %q: %w", box, err)
+	}
+	s.sel = box
+	return nil
+}
+
+var roles = map[imap.MailboxAttr]string{
+	imap.MailboxAttrAll: "all", imap.MailboxAttrArchive: "archive", imap.MailboxAttrDrafts: "drafts",
+	imap.MailboxAttrFlagged: "flagged", imap.MailboxAttrJunk: "junk", imap.MailboxAttrSent: "sent",
+	imap.MailboxAttrTrash: "trash", imap.MailboxAttrImportant: "important",
+}
+
+// listFolders returns every selectable folder with its special-use role, which
+// is how the app finds Trash or All Mail without hardcoding "[Gmail]/...".
+func listFolders(cl *imapclient.Client) ([]Folder, error) {
+	var opts *imap.ListOptions
+	if caps := cl.Caps(); caps.Has(imap.CapListExtended) && caps.Has(imap.CapSpecialUse) {
+		opts = &imap.ListOptions{ReturnSpecialUse: true}
+	}
+	list, err := cl.List("", "*", opts).Collect()
 	if err != nil {
 		return nil, err
 	}
-	defer cl.Logout()
-	list, err := cl.List("", "*", nil).Collect()
-	if err != nil {
-		return nil, err
-	}
-	out := []string{}
+	out := []Folder{}
 	for _, l := range list {
-		if !slices.Contains(l.Attrs, imap.MailboxAttrNoSelect) {
-			out = append(out, l.Mailbox)
+		if !slices.Contains(l.Attrs, imap.MailboxAttrNoSelect) && !slices.Contains(l.Attrs, imap.MailboxAttrNonExistent) {
+			out = append(out, folderOf(l))
 		}
 	}
-	slices.Sort(out)
+	slices.SortFunc(out, func(a, b Folder) int { return strings.Compare(a.Name, b.Name) })
 	return out, nil
 }
 
-const batch = 50
-
-// syncLabel pulls every message newer than the stored last UID. Read-only:
-// EXAMINE + BODY.PEEK, so nothing on the server changes. Commits every
-// `batch` messages so memory stays flat and an interrupted sync resumes.
-func (s *Store) syncLabel(cl *imapclient.Client, label string, progress func(int)) error {
-	sel, err := cl.Select(label, &imap.SelectOptions{ReadOnly: true}).Wait()
-	if err != nil {
-		return fmt.Errorf("open label %q: %w", label, err)
+func folderOf(l *imap.ListData) Folder {
+	f := Folder{Name: l.Mailbox}
+	if strings.EqualFold(l.Mailbox, "INBOX") {
+		f.Role = "inbox"
 	}
+	for _, a := range l.Attrs {
+		if r, ok := roles[a]; ok {
+			f.Role = r
+		}
+	}
+	return f
+}
+
+// defaultSynced says whether a folder is ticked before the user picks: All Mail
+// and Important only repeat messages that live in other folders.
+func defaultSynced(f Folder) bool { return f.Role != "all" && f.Role != "important" }
+
+var batch = 500 // var so tests can shrink it
+
+// syncLabel brings one folder up to date: headers of new messages, then
+// reconcile. Bodies are not fetched here. Commits every `batch` messages so
+// memory stays flat and an interrupted sync resumes.
+func (s *Store) syncLabel(ss *session, label string, progress func(int)) error {
+	ss.sel = ""
+	sel, err := ss.cl.Select(label, nil).Wait()
+	if err != nil {
+		return fmt.Errorf("open folder %q: %w", label, err)
+	}
+	ss.sel = label
 	validity, last := s.labelState(label)
-	if validity != sel.UIDValidity {
+	if validity != sel.UIDValidity { // UIDs were renumbered: start the folder over
+		if _, err := s.db.Exec(`DELETE FROM message_labels WHERE label=?`, label); err != nil {
+			return err
+		}
 		last = 0
 	}
-	if sel.NumMessages == 0 || (sel.UIDNext != 0 && uint32(sel.UIDNext) <= last+1) {
-		return nil
-	}
-	sec := &imap.FetchItemBodySection{Peek: true}
-	cmd := cl.Fetch(imap.UIDSet{{Start: imap.UID(last + 1), Stop: 0}}, &imap.FetchOptions{
-		UID: true, Flags: true, BodySection: []*imap.FetchItemBodySection{sec},
-	})
-	defer cmd.Close()
-
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer func() { tx.Rollback() }()
-	n := 0
-	for fm := cmd.Next(); fm != nil; fm = cmd.Next() {
-		buf, err := fm.Collect()
-		if err != nil {
+	if sel.NumMessages > 0 && (sel.UIDNext == 0 || uint32(sel.UIDNext) > last+1) {
+		cmd := ss.cl.Fetch(imap.UIDSet{{Start: imap.UID(last + 1), Stop: 0}}, &imap.FetchOptions{
+			UID: true, Flags: true, Envelope: true, RFC822Size: true, InternalDate: true,
+		})
+		defer cmd.Close()
+		n := 0
+		for fm := cmd.Next(); fm != nil; fm = cmd.Next() {
+			buf, err := fm.Collect()
+			if err != nil {
+				return err
+			}
+			if uint32(buf.UID) <= last || buf.Envelope == nil { // "n:*" always returns the newest message
+				continue
+			}
+			last = uint32(buf.UID)
+			if err := insertHeader(tx, envMsg(buf), label, last); err != nil {
+				return err
+			}
+			if n++; n%batch == 0 {
+				if err := setLabelState(tx, label, sel.UIDValidity, last); err != nil {
+					return err
+				}
+				if err := tx.Commit(); err != nil {
+					return err
+				}
+				progress(n)
+				if tx, err = s.db.Begin(); err != nil {
+					return err
+				}
+			}
+		}
+		if err := cmd.Close(); err != nil {
 			return err
 		}
-		if uint32(buf.UID) <= last { // "n:*" always returns the newest message
-			continue
-		}
-		last = uint32(buf.UID)
-		m, err := parseMsg(buf.FindBodySection(sec))
-		if err != nil {
-			log.Printf("skip %s uid %d: %v", label, buf.UID, err)
-			continue
-		}
-		m.Read = slices.Contains(buf.Flags, imap.FlagSeen)
-		if err := insertMsg(tx, m, label); err != nil {
-			return err
-		}
-		if n++; n%batch == 0 {
-			if err := setLabelState(tx, label, sel.UIDValidity, last); err != nil {
-				return err
-			}
-			if err := tx.Commit(); err != nil {
-				return err
-			}
-			progress(n)
-			if tx, err = s.db.Begin(); err != nil {
-				return err
-			}
-		}
+		progress(n)
 	}
 	if err := setLabelState(tx, label, sel.UIDValidity, last); err != nil {
 		return err
@@ -126,65 +170,207 @@ func (s *Store) syncLabel(cl *imapclient.Client, label string, progress func(int
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	progress(n)
+	return s.reconcile(ss.cl, label)
+}
+
+func envMsg(buf *imapclient.FetchMessageBuffer) *Msg {
+	e := buf.Envelope
+	m := &Msg{Subject: e.Subject, MessageID: e.MessageID, Size: buf.RFC822Size,
+		Read: slices.Contains(buf.Flags, imap.FlagSeen), Flagged: slices.Contains(buf.Flags, imap.FlagFlagged)}
+	m.Date = e.Date.Unix()
+	if e.Date.IsZero() {
+		m.Date = buf.InternalDate.Unix()
+	}
+	if len(e.From) > 0 {
+		m.FromName, m.FromAddr = e.From[0].Name, strings.ToLower(e.From[0].Addr())
+	}
+	if m.FromName == "" {
+		m.FromName = m.FromAddr
+	}
+	var to []string
+	for _, a := range append(slices.Clone(e.To), e.Cc...) {
+		if a.Name != "" {
+			to = append(to, a.Name)
+		} else if a.Mailbox != "" {
+			to = append(to, a.Addr())
+		}
+	}
+	m.To = strings.Join(to, ", ")
+	if m.MessageID == "" {
+		m.MessageID = synthID(m)
+	}
+	return m
+}
+
+// synthID stands in for a missing Message-ID, stable across folders.
+func synthID(m *Msg) string {
+	sum := sha256.Sum256([]byte(m.FromAddr + m.Subject + fmt.Sprint(m.Date)))
+	return "nomsgid-" + hex.EncodeToString(sum[:8])
+}
+
+// reconcile makes the folder's local rows match the server: rows whose UID
+// is gone (archived, deleted, moved elsewhere) are dropped, and read/starred
+// follow the server unless a local change is still waiting to be pushed.
+// Three SEARCHes return bare UID lists, cheap even for 50k messages.
+// ponytail: an action that lands mid-sync can be undone locally until the next sync.
+func (s *Store) reconcile(cl *imapclient.Client, label string) error {
+	search := func(c *imap.SearchCriteria) (map[uint32]bool, error) {
+		d, err := cl.UIDSearch(c, nil).Wait()
+		if err != nil {
+			return nil, err
+		}
+		set := map[uint32]bool{}
+		for _, u := range d.AllUIDs() {
+			set[uint32(u)] = true
+		}
+		return set, nil
+	}
+	all, err := search(&imap.SearchCriteria{})
+	if err != nil {
+		return err
+	}
+	unseen, err := search(&imap.SearchCriteria{NotFlag: []imap.Flag{imap.FlagSeen}})
+	if err != nil {
+		return err
+	}
+	flagged, err := search(&imap.SearchCriteria{Flag: []imap.Flag{imap.FlagFlagged}})
+	if err != nil {
+		return err
+	}
+
+	type row struct {
+		uid                    uint32
+		id                     int64
+		read, flagged, pending bool
+	}
+	rows, err := s.db.Query(`SELECT l.uid, m.id, m.read, m.flagged, EXISTS(SELECT 1 FROM pending_flags p WHERE p.message_id=m.id)
+		FROM message_labels l JOIN messages m ON m.id=l.message_id WHERE l.label=?`, label)
+	if err != nil {
+		return err
+	}
+	var local []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.uid, &r.id, &r.read, &r.flagged, &r.pending); err != nil {
+			rows.Close()
+			return err
+		}
+		local = append(local, r)
+	}
+	rows.Close()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, r := range local {
+		switch {
+		case !all[r.uid]:
+			_, err = tx.Exec(`DELETE FROM message_labels WHERE label=? AND uid=?`, label, r.uid)
+		case !r.pending && (r.read == unseen[r.uid] || r.flagged != flagged[r.uid]):
+			_, err = tx.Exec(`UPDATE messages SET read=?, flagged=? WHERE id=?`, !unseen[r.uid], flagged[r.uid], r.id)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// fetchBodies downloads whole messages by UID in label and caches them.
+func (s *Store) fetchBodies(ss *session, label string, uids []imap.UID) error {
+	if len(uids) == 0 {
+		return nil
+	}
+	if err := ss.open(label); err != nil {
+		return err
+	}
+	sec := &imap.FetchItemBodySection{Peek: true}
+	cmd := ss.cl.Fetch(imap.UIDSetNum(uids...), &imap.FetchOptions{UID: true, BodySection: []*imap.FetchItemBodySection{sec}})
+	defer cmd.Close()
+	for fm := cmd.Next(); fm != nil; fm = cmd.Next() {
+		buf, err := fm.Collect()
+		if err != nil {
+			return err
+		}
+		if raw := buf.FindBodySection(sec); raw != nil {
+			if _, err := s.setBody(label, uint32(buf.UID), raw); err != nil {
+				return err
+			}
+		}
+	}
 	return cmd.Close()
 }
 
-// pushSeen marks queued issues read in Gmail. Gmail keeps flags per message,
-// not per label, so finding it by Message-ID in any one of its labels is enough.
-// Rows stay queued on error, so the next call retries them.
-// ponytail: a label deleted in Gmail keeps its rows queued and retried each sync.
-func (s *Store) pushSeen(cl *imapclient.Client) error {
-	type item struct {
-		id           int64
-		msgID, label string
+// prefetch is how many of the newest Inbox messages get their bodies
+// downloaded after a sync, so the common case opens without a round trip.
+const prefetch, prefetchMax = 200, 2 << 20
+
+func (s *Store) missingBodies(label string) ([]imap.UID, error) {
+	rows, err := s.db.Query(`SELECT l.uid FROM message_labels l JOIN messages m ON m.id=l.message_id
+		WHERE l.label=? AND m.size<? AND NOT EXISTS(SELECT 1 FROM bodies b WHERE b.id=m.id)
+		ORDER BY m.date DESC LIMIT ?`, label, prefetchMax, prefetch)
+	if err != nil {
+		return nil, err
 	}
-	rows, err := s.db.Query(`SELECT p.message_id, m.message_id, min(l.label) FROM pending_seen p
-		JOIN messages m ON m.id=p.message_id JOIN message_labels l ON l.message_id=m.id
-		GROUP BY p.message_id ORDER BY 3`)
+	defer rows.Close()
+	var out []imap.UID
+	for rows.Next() {
+		var u uint32
+		rows.Scan(&u)
+		out = append(out, imap.UID(u))
+	}
+	return out, rows.Err()
+}
+
+// pushFlags sends queued read/starred changes to the server. Gmail keeps flags
+// per message, not per label, so storing them in any one folder is enough.
+// Rows stay queued on error, so the next call retries them.
+func (s *Store) pushFlags(ss *session) error {
+	type item struct {
+		id          int64
+		flag, label string
+		value       bool
+		uid         uint32
+	}
+	rows, err := s.db.Query(`SELECT p.message_id, p.flag, p.value, l.label, l.uid FROM pending_flags p
+		JOIN message_labels l ON l.message_id=p.message_id
+		WHERE l.label=(SELECT min(label) FROM message_labels WHERE message_id=p.message_id) ORDER BY l.label`)
 	if err != nil {
 		return err
 	}
 	var items []item
 	for rows.Next() {
 		var it item
-		if err := rows.Scan(&it.id, &it.msgID, &it.label); err != nil {
+		if err := rows.Scan(&it.id, &it.flag, &it.value, &it.label, &it.uid); err != nil {
 			rows.Close()
 			return err
 		}
 		items = append(items, it)
 	}
 	rows.Close()
-	selected := ""
 	for _, it := range items {
-		if !strings.HasPrefix(it.msgID, "nomsgid-") { // synthetic id: nothing to search for
-			if it.label != selected {
-				if _, err := cl.Select(it.label, nil).Wait(); err != nil {
-					return fmt.Errorf("open label %q: %w", it.label, err)
-				}
-				selected = it.label
-			}
-			found, err := cl.UIDSearch(&imap.SearchCriteria{
-				Header: []imap.SearchCriteriaHeaderField{{Key: "Message-ID", Value: it.msgID}},
-			}, nil).Wait()
-			if err != nil {
-				return err
-			}
-			if uids := found.AllUIDs(); len(uids) > 0 { // none: gone from Gmail, drop it
-				store := &imap.StoreFlags{Op: imap.StoreFlagsAdd, Silent: true, Flags: []imap.Flag{imap.FlagSeen}}
-				if err := cl.Store(imap.UIDSetNum(uids...), store, nil).Close(); err != nil {
-					return err
-				}
-			}
+		if err := ss.open(it.label); err != nil {
+			return err
 		}
-		if _, err := s.db.Exec(`DELETE FROM pending_seen WHERE message_id=?`, it.id); err != nil {
+		op := imap.StoreFlagsDel
+		if it.value {
+			op = imap.StoreFlagsAdd
+		}
+		store := &imap.StoreFlags{Op: op, Silent: true, Flags: []imap.Flag{imap.Flag(it.flag)}}
+		if err := ss.cl.Store(imap.UIDSetNum(imap.UID(it.uid)), store, nil).Close(); err != nil {
+			return err
+		}
+		// Only if unchanged: a toggle made during the push stays queued.
+		if _, err := s.db.Exec(`DELETE FROM pending_flags WHERE message_id=? AND flag=? AND value=?`, it.id, it.flag, it.value); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// ponytail: cid: inline images and attachments are ignored; newsletters link remote images.
+// ponytail: cid: inline images and attachments are ignored for now.
 func parseMsg(raw []byte) (*Msg, error) {
 	mr, err := mail.CreateReader(bytes.NewReader(raw))
 	if mr == nil {
@@ -204,8 +390,7 @@ func parseMsg(raw []byte) (*Msg, error) {
 	}
 	m.MessageID, _ = h.MessageID()
 	if m.MessageID == "" {
-		sum := sha256.Sum256([]byte(m.FromAddr + m.Subject + fmt.Sprint(m.Date)))
-		m.MessageID = "nomsgid-" + hex.EncodeToString(sum[:8])
+		m.MessageID = synthID(m)
 	}
 
 	var htmlBody, plain string

@@ -46,14 +46,37 @@ export namespace main {
 	        this.unread = source["unread"];
 	    }
 	}
+	export class Folder {
+	    name: string;
+	    role: string;
+	    total: number;
+	    unread: number;
+	    synced: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Folder(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.role = source["role"];
+	        this.total = source["total"];
+	        this.unread = source["unread"];
+	        this.synced = source["synced"];
+	    }
+	}
 	export class Msg {
 	    id: number;
 	    fromName: string;
 	    fromAddr: string;
+	    to: string;
 	    subject: string;
 	    date: number;
-	    html?: string;
 	    read: boolean;
+	    flagged: boolean;
+	    html?: string;
+	    labels?: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Msg(source);
@@ -64,10 +87,13 @@ export namespace main {
 	        this.id = source["id"];
 	        this.fromName = source["fromName"];
 	        this.fromAddr = source["fromAddr"];
+	        this.to = source["to"];
 	        this.subject = source["subject"];
 	        this.date = source["date"];
-	        this.html = source["html"];
 	        this.read = source["read"];
+	        this.flagged = source["flagged"];
+	        this.html = source["html"];
+	        this.labels = source["labels"];
 	    }
 	}
 	export class Query {
@@ -88,6 +114,20 @@ export namespace main {
 	        this.search = source["search"];
 	        this.sort = source["sort"];
 	        this.offset = source["offset"];
+	    }
+	}
+	export class ServerFolder {
+	    name: string;
+	    default: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ServerFolder(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.default = source["default"];
 	    }
 	}
 

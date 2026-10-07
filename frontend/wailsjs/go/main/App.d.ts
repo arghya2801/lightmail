@@ -4,9 +4,9 @@ import {main} from '../models';
 
 export function ChooseSaveDir():Promise<string>;
 
-export function GetConfig():Promise<main.Config>;
+export function Folders():Promise<Array<main.Folder>>;
 
-export function Labels():Promise<Array<main.Count>>;
+export function GetConfig():Promise<main.Config>;
 
 export function List(arg1:main.Query):Promise<Array<main.Msg>>;
 
@@ -18,11 +18,11 @@ export function SaveEmail(arg1:number):Promise<string>;
 
 export function Senders(arg1:string):Promise<Array<main.Count>>;
 
-export function ServerLabels():Promise<Array<string>>;
+export function ServerFolders():Promise<Array<main.ServerFolder>>;
 
 export function SetAppearance(arg1:string,arg2:number):Promise<void>;
 
-export function SetRead(arg1:number,arg2:boolean):Promise<void>;
+export function SetFlag(arg1:number,arg2:string,arg3:boolean):Promise<void>;
 
 export function SetReaderZoom(arg1:number):Promise<void>;
 

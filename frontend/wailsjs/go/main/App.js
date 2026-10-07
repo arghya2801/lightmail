@@ -6,12 +6,12 @@ export function ChooseSaveDir() {
   return window['go']['main']['App']['ChooseSaveDir']();
 }
 
-export function GetConfig() {
-  return window['go']['main']['App']['GetConfig']();
+export function Folders() {
+  return window['go']['main']['App']['Folders']();
 }
 
-export function Labels() {
-  return window['go']['main']['App']['Labels']();
+export function GetConfig() {
+  return window['go']['main']['App']['GetConfig']();
 }
 
 export function List(arg1) {
@@ -34,16 +34,16 @@ export function Senders(arg1) {
   return window['go']['main']['App']['Senders'](arg1);
 }
 
-export function ServerLabels() {
-  return window['go']['main']['App']['ServerLabels']();
+export function ServerFolders() {
+  return window['go']['main']['App']['ServerFolders']();
 }
 
 export function SetAppearance(arg1, arg2) {
   return window['go']['main']['App']['SetAppearance'](arg1, arg2);
 }
 
-export function SetRead(arg1, arg2) {
-  return window['go']['main']['App']['SetRead'](arg1, arg2);
+export function SetFlag(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SetFlag'](arg1, arg2, arg3);
 }
 
 export function SetReaderZoom(arg1) {

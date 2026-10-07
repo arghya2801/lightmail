@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { GetConfig, Labels, Senders, List, Open, SetRead, SaveEmail, Sync, SetAppearance, SetReaderZoom } from '../wailsjs/go/main/App'
+  import { GetConfig, Folders, Senders, List, Open, SetFlag, SaveEmail, Sync, SetAppearance, SetReaderZoom } from '../wailsjs/go/main/App'
   import { EventsOn } from '../wailsjs/runtime/runtime'
   import Reader from './Reader.svelte'
   import Settings, { zooms } from './Settings.svelte'
@@ -31,6 +31,11 @@
   }
   const short = (l) => l.split('/').pop()
 
+  // System folders by role, in Gmail's order; user labels sit between them and Spam/Trash.
+  const roleNames = { inbox: 'Inbox', flagged: 'Starred', important: 'Important', sent: 'Sent', drafts: 'Drafts', all: 'All Mail', archive: 'Archive', junk: 'Spam', trash: 'Trash' }
+  const roleRank = (r) => { const i = Object.keys(roleNames).indexOf(r); return i < 0 ? 7 : i < 7 ? i : i + 1 }
+  const folderName = (f) => roleNames[f.role] ?? f.name
+
   let visibleSenders = $derived(
     senderFilter ? senders.filter((s) => (s.name + s.key).toLowerCase().includes(senderFilter.toLowerCase())) : senders,
   )
@@ -43,7 +48,7 @@
   }
 
   async function counts() {
-    labels = (await Labels()) ?? []
+    labels = ((await Folders()) ?? []).filter((f) => f.synced).sort((a, b) => roleRank(a.role) - roleRank(b.role) || a.name.localeCompare(b.name))
     senders = (await Senders(q.label)) ?? []
   }
 
@@ -66,7 +71,11 @@
   }
 
   async function open(m) {
-    msg = await Open(m.id)
+    try {
+      msg = await Open(m.id)
+    } catch (e) {
+      return flash('Could not open this message: ' + e)
+    }
     view = 'reader'
     if (!m.read) {
       m.read = true
@@ -97,7 +106,7 @@
     if (!msg) return
     const m = items.find((x) => x.id === msg.id)
     const read = !(m?.read ?? msg.read)
-    await SetRead(msg.id, read)
+    await SetFlag(msg.id, '\\Seen', read)
     if (m) m.read = read
     msg.read = read
     counts()
@@ -189,10 +198,10 @@
     <button class="row" class:on={view === 'reader' && !q.label} onclick={() => ((q.label = ''), (q.sender = ''), (view = 'reader'))}>
       <span>All mail</span>
     </button>
-    {#each labels as l (l.key)}
-      <button class="row" class:on={view === 'reader' && q.label === l.key} title={l.key}
-        onclick={() => ((q.label = l.key), (q.sender = ''), (view = 'reader'))}>
-        <span>{short(l.key)}</span>{#if l.unread}<span class="n">{l.unread}</span>{/if}
+    {#each labels as l (l.name)}
+      <button class="row" class:on={view === 'reader' && q.label === l.name} title={l.name}
+        onclick={() => ((q.label = l.name), (q.sender = ''), (view = 'reader'))}>
+        <span>{folderName(l)}</span>{#if l.unread}<span class="n">{l.unread}</span>{/if}
       </button>
     {/each}
 

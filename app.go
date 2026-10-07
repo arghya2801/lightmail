@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
+	"github.com/emersion/go-imap/v2"
+	"github.com/emersion/go-imap/v2/imapclient"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -18,11 +22,16 @@ type App struct {
 	mu      sync.Mutex // guards cfg
 	cfg     Config
 	syncing sync.Mutex
-	pushing sync.Mutex // one pushSeen at a time
+	dial    func() (*imapclient.Client, error) // swapped in tests
+
+	connMu sync.Mutex // guards conn, the connection for clicks (open, move, flags)
+	conn   *session
 }
 
 func NewApp(dir string, portable bool, store *Store) *App {
-	return &App{dir: dir, store: store, cfg: loadConfig(dir, portable)}
+	a := &App{dir: dir, store: store, cfg: loadConfig(dir, portable)}
+	a.dial = func() (*imapclient.Client, error) { return dial(a.config()) }
+	return a
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -60,6 +69,7 @@ func (a *App) SaveConfig(c Config) error {
 	a.mu.Lock()
 	a.cfg = c
 	a.mu.Unlock()
+	a.dropConn() // the account may have changed
 	return saveConfig(a.dir, c)
 }
 
@@ -84,10 +94,63 @@ func (a *App) SetReaderZoom(zoom int) error {
 	return saveConfig(a.dir, c)
 }
 
-func (a *App) ServerLabels() ([]string, error) { return serverLabels(a.config()) }
+type ServerFolder struct {
+	Name    string `json:"name"`
+	Default bool   `json:"default"` // ticked unless the user says otherwise
+}
+
+// ServerFolders lists the account's folders for the Settings picker.
+func (a *App) ServerFolders() ([]ServerFolder, error) {
+	var out []ServerFolder
+	err := a.imap(func(s *session) error {
+		fs, err := listFolders(s.cl)
+		if err != nil {
+			return err
+		}
+		a.store.setFolders(fs)
+		for _, f := range fs {
+			out = append(out, ServerFolder{f.Name, defaultSynced(f)})
+		}
+		return nil
+	})
+	return out, err
+}
 
 func (a *App) ChooseSaveDir() (string, error) {
 	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{Title: "Folder for saved emails", DefaultDirectory: a.saveDir()})
+}
+
+// imap runs f on the shared connection for user actions, dialing when there is
+// none. A dropped connection (Gmail closes idle ones) is redialed once; a
+// server refusal (NO/BAD) is returned as is.
+func (a *App) imap(f func(*session) error) error {
+	a.connMu.Lock()
+	defer a.connMu.Unlock()
+	for try := 0; ; try++ {
+		if a.conn == nil {
+			cl, err := a.dial()
+			if err != nil {
+				return err
+			}
+			a.conn = &session{cl: cl}
+		}
+		err := f(a.conn)
+		var refused *imap.Error
+		if err == nil || errors.As(err, &refused) || try == 1 {
+			return err
+		}
+		a.conn.cl.Close()
+		a.conn = nil
+	}
+}
+
+func (a *App) dropConn() {
+	a.connMu.Lock()
+	defer a.connMu.Unlock()
+	if a.conn != nil {
+		a.conn.cl.Close()
+		a.conn = nil
+	}
 }
 
 type SyncStatus struct {
@@ -97,7 +160,13 @@ type SyncStatus struct {
 	Error   string `json:"error"`
 }
 
-// Sync pulls new mail from every picked label. Concurrent calls are no-ops.
+func (a *App) emit(s SyncStatus) {
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "sync", s)
+	}
+}
+
+// Sync brings every picked folder up to date. Concurrent calls are no-ops.
 func (a *App) Sync() {
 	if !a.syncing.TryLock() {
 		return
@@ -107,67 +176,135 @@ func (a *App) Sync() {
 	if len(c.Labels) == 0 || c.Password == "" {
 		return
 	}
-	emit := func(s SyncStatus) { runtime.EventsEmit(a.ctx, "sync", s) }
-	emit(SyncStatus{Running: true})
-	cl, err := dial(c)
+	a.emit(SyncStatus{Running: true})
+	a.pushFlags() // first, so the reconcile below sees local changes on the server
+	if err := a.syncAll(c.Labels); err != nil {
+		a.emit(SyncStatus{Error: err.Error()})
+	}
+}
+
+// syncAll runs one sync on its own connection, so clicks never wait behind it.
+func (a *App) syncAll(labels []string) error {
+	cl, err := a.dial()
 	if err != nil {
-		emit(SyncStatus{Error: err.Error()})
-		return
+		return err
 	}
 	defer cl.Logout()
-	fetched := 0 // new messages across all labels
-	for _, l := range c.Labels {
+	ss := &session{cl: cl}
+	folders, err := listFolders(cl)
+	if err != nil {
+		return err
+	}
+	if err := a.store.setFolders(folders); err != nil {
+		return err
+	}
+	var live []string // picked folders that still exist on the server
+	for _, f := range folders {
+		if slices.Contains(labels, f.Name) {
+			live = append(live, f.Name)
+		}
+	}
+	fetched := 0 // new messages across all folders
+	for _, l := range live {
 		done := 0
-		err := a.store.syncLabel(cl, l, func(n int) {
+		err := a.store.syncLabel(ss, l, func(n int) {
 			done = n
-			emit(SyncStatus{Running: true, Label: l, Count: fetched + n})
+			a.emit(SyncStatus{Running: true, Label: l, Count: fetched + n})
 		})
 		fetched += done
 		if err != nil {
-			emit(SyncStatus{Error: err.Error(), Count: fetched})
-			return
+			return err
 		}
 	}
-	emit(SyncStatus{Count: fetched})
-	a.pushSeen() // retry anything that failed to reach Gmail earlier
+	if err := a.store.prune(live); err != nil {
+		return err
+	}
+	a.emit(SyncStatus{Count: fetched})
+
+	if inbox := a.store.roleFolder("inbox"); slices.Contains(live, inbox) {
+		uids, err := a.store.missingBodies(inbox)
+		if err == nil {
+			err = a.store.fetchBodies(ss, inbox, uids)
+		}
+		if err != nil {
+			log.Printf("prefetch: %v", err)
+		}
+	}
+	return nil
 }
 
-// pushSeen sends queued "opened in the app" marks to Gmail. Failures stay queued.
-func (a *App) pushSeen() {
-	a.pushing.Lock()
-	defer a.pushing.Unlock()
+// pushFlags sends queued read/starred changes. Failures stay queued.
+func (a *App) pushFlags() {
 	var n int
-	if a.store.db.QueryRow(`SELECT count(*) FROM pending_seen`).Scan(&n); n == 0 {
+	if a.store.db.QueryRow(`SELECT count(*) FROM pending_flags`).Scan(&n); n == 0 {
 		return
 	}
-	cl, err := dial(a.config())
-	if err != nil {
-		log.Printf("mark read in Gmail: %v", err)
-		return
-	}
-	defer cl.Logout()
-	if err := a.store.pushSeen(cl); err != nil {
-		log.Printf("mark read in Gmail: %v", err)
+	if err := a.imap(a.store.pushFlags); err != nil {
+		log.Printf("push flags: %v", err)
 	}
 }
 
-func (a *App) Labels() ([]Count, error)              { return a.store.Labels() }
+func (a *App) Folders() ([]Folder, error) {
+	fs, err := a.store.Folders()
+	labels := a.config().Labels
+	for i := range fs {
+		fs[i].Synced = slices.Contains(labels, fs[i].Name)
+	}
+	return fs, err
+}
+
 func (a *App) Senders(label string) ([]Count, error) { return a.store.Senders(label) }
 func (a *App) List(q Query) ([]Msg, error)           { return a.store.List(q) }
-func (a *App) SetRead(id int64, read bool) error     { return a.store.SetRead(id, read) }
 
-// Open returns a message ready to render and marks it read, here and in Gmail.
+// SetFlag sets read (`\Seen`) or starred (`\Flagged`) here, then on the server.
+func (a *App) SetFlag(id int64, flag string, value bool) error {
+	if err := a.store.setFlag(id, flag, value); err != nil {
+		return err
+	}
+	go a.pushFlags()
+	return nil
+}
+
+// raw returns the whole message, downloading and caching it on first open.
+func (a *App) raw(id int64) ([]byte, error) {
+	if b, err := a.store.body(id); b != nil || err != nil {
+		return b, err
+	}
+	label, uid, err := a.store.location(id)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.imap(func(s *session) error { return a.store.fetchBodies(s, label, []imap.UID{imap.UID(uid)}) }); err != nil {
+		return nil, err
+	}
+	b, err := a.store.body(id)
+	if b == nil && err == nil {
+		err = errors.New("the server returned no message; it may have been moved or deleted, try syncing")
+	}
+	return b, err
+}
+
+// Open returns a message ready to render and marks it read, here and on the server.
 func (a *App) Open(id int64) (Msg, error) {
 	m, err := a.store.Get(id)
 	if err != nil {
-		return Msg{}, err
+		return m, err
 	}
-	m.HTML = rewrite(m.HTML, proxied)
+	raw, err := a.raw(id)
+	if err != nil {
+		return m, err
+	}
+	p, err := parseMsg(raw)
+	if err != nil {
+		return m, err
+	}
+	m.HTML = rewrite(p.HTML, proxied)
+	if m.Labels, err = a.store.labelsOf(id); err != nil {
+		return m, err
+	}
 	if !m.Read {
-		a.store.SetRead(id, true)
-		if a.store.queueSeen(id) == nil {
-			go a.pushSeen()
-		}
+		m.Read = true
+		a.SetFlag(id, `\Seen`, true)
 	}
 	return m, nil
 }
@@ -177,5 +314,14 @@ func (a *App) SaveEmail(id int64) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	raw, err := a.raw(id)
+	if err != nil {
+		return "", err
+	}
+	p, err := parseMsg(raw)
+	if err != nil {
+		return "", err
+	}
+	m.HTML = p.HTML
 	return saveEmail(a.dir, a.saveDir(), m)
 }

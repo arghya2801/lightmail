@@ -4,7 +4,7 @@
 
 <script>
   import { onMount } from 'svelte'
-  import { GetConfig, SaveConfig, ServerLabels, ChooseSaveDir } from '../wailsjs/go/main/App'
+  import { GetConfig, SaveConfig, ServerFolders, ChooseSaveDir } from '../wailsjs/go/main/App'
   import { BrowserOpenURL } from '../wailsjs/runtime/runtime'
 
   // look is the live appearance, owned by App so keyboard zoom and this page agree.
@@ -31,7 +31,10 @@
     error = ''
     try {
       await SaveConfig(cfg)
-      serverLabels = (await ServerLabels()) ?? []
+      const fs = (await ServerFolders()) ?? []
+      serverLabels = fs.map((f) => f.name)
+      // First time: tick everything except folders that only repeat others (All Mail, Important).
+      if (!cfg.labels.length) cfg.labels = fs.filter((f) => f.default).map((f) => f.name)
     } catch (e) {
       error = String(e)
     }
