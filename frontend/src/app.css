@@ -41,7 +41,7 @@
 
 :root[data-density="compact"] {
   --side-w: 196px;
-  --list-w: 300px;
+  --list-w: 440px; /* one-line rows need room for sender and subject */
   --nav-py: 2px;
   --row-py: 7px;
   --row-px: 12px;

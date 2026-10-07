@@ -49,7 +49,7 @@
     cursor: default; user-select: none; border-left: 3px solid transparent;
   }
   :global([data-density='compact']) .item {
-    grid-template-columns: auto auto minmax(0, 11em) minmax(0, 1fr) auto;
+    grid-template-columns: auto auto minmax(0, 9em) minmax(0, 1fr) auto;
     grid-template-areas: 'pick star from subj date';
   }
   .item:hover { background: color-mix(in srgb, var(--paper) 50%, var(--chrome)); }
