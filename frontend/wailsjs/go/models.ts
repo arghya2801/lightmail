@@ -66,6 +66,24 @@ export namespace main {
 	        this.synced = source["synced"];
 	    }
 	}
+	export class Moved {
+	    id: number;
+	    from: string;
+	    to: string;
+	    uid: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Moved(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.from = source["from"];
+	        this.to = source["to"];
+	        this.uid = source["uid"];
+	    }
+	}
 	export class Msg {
 	    id: number;
 	    fromName: string;
