@@ -26,6 +26,10 @@ export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }
 
+export function GetSyncStatus() {
+  return window['go']['main']['App']['GetSyncStatus']();
+}
+
 export function List(arg1) {
   return window['go']['main']['App']['List'](arg1);
 }

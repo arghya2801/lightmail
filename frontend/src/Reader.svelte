@@ -1,7 +1,8 @@
 <script>
   import { BrowserOpenURL } from '../wailsjs/runtime/runtime'
 
-  let { msg, onkey, zoom, onzoom, onsave, ontoggleread } = $props()
+  // actions: [{ label, key, run }] for this message, built by App so the bulk panel shares them.
+  let { msg, actions, chips, onkey, zoom, onzoom, onsave } = $props()
 
   let frame = $state()
 
@@ -63,18 +64,27 @@
 <article class="sheet">
   <header>
     <h1>{msg.subject || '(no subject)'}</h1>
-    <p class="by muted"><span title={msg.fromAddr}>{msg.fromName}</span>, {date}</p>
+    <p class="by muted">
+      <span class="who" title={msg.fromAddr}>{msg.fromName}</span>{#if msg.to}&ensp;to {msg.to}{/if}, {date}
+    </p>
+    {#if chips.length}
+      <p class="chips">{#each chips as c}<span class="chip">{c}</span>{/each}</p>
+    {/if}
     <div class="actions">
-      <button onclick={onsave} title="Shift+S">Save as HTML</button>
-      <button onclick={ontoggleread} title="Shift+U">Mark unread</button>
+      {#each actions as a (a.label)}<button onclick={a.run} title={a.key}>{a.label}</button>{/each}
       <span class="right">
+        {#if !msg.error}<button onclick={onsave} title="Shift+S">Save as HTML</button>{/if}
         {#if zoom !== 100}<button class="muted zoom" onclick={() => onzoom(0)} title="Reset zoom (Ctrl+0)">{zoom}%</button>{/if}
       </span>
     </div>
   </header>
 
   <div class="body" {onwheel}>
-    <iframe bind:this={frame} title={msg.subject} sandbox="allow-same-origin" {srcdoc} onload={loaded}></iframe>
+    {#if msg.error}
+      <p class="error">{msg.error}</p>
+    {:else}
+      <iframe bind:this={frame} title={msg.subject} sandbox="allow-same-origin" {srcdoc} onload={loaded}></iframe>
+    {/if}
   </div>
 </article>
 
@@ -88,10 +98,14 @@
     font: 500 var(--h1-size)/1.15 var(--serif); font-optical-sizing: auto; letter-spacing: -0.01em;
     margin: 0 0 10px; text-wrap: balance;
   }
-  .by { margin: 0 0 16px; }
+  .by { margin: 0 0 12px; }
+  .who { color: var(--ink); }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 12px; }
+  .chip { font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--chrome); color: var(--muted); }
   .actions { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-left: -8px; }
-  .right { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .right { margin-left: auto; display: flex; align-items: center; gap: 4px; }
   .zoom { font-size: 12px; font-variant-numeric: tabular-nums; }
   .body { position: relative; }
+  .error { margin: 0; padding: 16px 40px 24px; border-top: 1px solid var(--rule); color: var(--muted); }
   iframe { display: block; width: 100%; height: 150px; border: 0; border-top: 1px solid var(--rule); background: #fff; }
 </style>

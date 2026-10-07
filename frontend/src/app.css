@@ -5,8 +5,10 @@
   --muted: #6b7584;
   --rule: #d3d8df;
   --mark: rgba(242, 201, 76, 0.55);
-  --mark-edge: rgba(242, 201, 76, 0.2);
   --focus: #3d6fb6;
+  --picked: color-mix(in srgb, var(--focus) 10%, var(--paper));
+  --drop: color-mix(in srgb, var(--focus) 18%, transparent);
+  --star: #c98a0c;
   /* density: comfortable by default, overridden by [data-density="compact"] */
   --side-w: 232px;
   --list-w: 360px;
@@ -31,8 +33,8 @@
     --muted: #97a0ad;
     --rule: #33383f;
     --mark: rgba(217, 169, 40, 0.5);
-    --mark-edge: rgba(217, 169, 40, 0.18);
     --focus: #8fb4ec;
+    --star: #e5b94a;
     color-scheme: dark;
   }
 }
@@ -70,17 +72,6 @@ input, select, textarea {
   background: var(--paper); border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px;
 }
 ::selection { background: var(--mark); }
-
-/* A marker stroke with uneven ends. */
-.marker {
-  background:
-    linear-gradient(104deg, transparent 0.9%, var(--mark) 2.4%, var(--mark-edge) 5.8%, var(--mark) 93%, var(--mark) 96%, transparent 98%),
-    linear-gradient(183deg, transparent 0%, var(--mark-edge) 8%, transparent 15%);
-  border-radius: 0.8em 0.3em;
-  padding: 0.05em 0.15em;
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
-}
 
 .muted { color: var(--muted); }
 .serif { font-family: var(--serif); }

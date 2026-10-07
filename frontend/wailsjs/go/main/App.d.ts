@@ -14,6 +14,8 @@ export function Folders():Promise<Array<main.Folder>>;
 
 export function GetConfig():Promise<main.Config>;
 
+export function GetSyncStatus():Promise<main.SyncStatus>;
+
 export function List(arg1:main.Query):Promise<Array<main.Msg>>;
 
 export function Move(arg1:Array<number>,arg2:string,arg3:string):Promise<Array<main.Moved>>;

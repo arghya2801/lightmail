@@ -26,6 +26,9 @@ type App struct {
 
 	connMu sync.Mutex // guards conn, the connection for clicks (open, move, flags)
 	conn   *session
+
+	statusMu sync.Mutex
+	status   SyncStatus // last one emitted
 }
 
 func NewApp(dir string, portable bool, store *Store) *App {
@@ -161,9 +164,19 @@ type SyncStatus struct {
 }
 
 func (a *App) emit(s SyncStatus) {
+	a.statusMu.Lock()
+	a.status = s
+	a.statusMu.Unlock()
 	if a.ctx != nil {
 		runtime.EventsEmit(a.ctx, "sync", s)
 	}
+}
+
+// GetSyncStatus returns the last sync status, for a page that missed the event.
+func (a *App) GetSyncStatus() SyncStatus {
+	a.statusMu.Lock()
+	defer a.statusMu.Unlock()
+	return a.status
 }
 
 // Sync brings every picked folder up to date. Concurrent calls are no-ops.

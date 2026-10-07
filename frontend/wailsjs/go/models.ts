@@ -148,6 +148,24 @@ export namespace main {
 	        this.default = source["default"];
 	    }
 	}
+	export class SyncStatus {
+	    running: boolean;
+	    label: string;
+	    count: number;
+	    error: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SyncStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.running = source["running"];
+	        this.label = source["label"];
+	        this.count = source["count"];
+	        this.error = source["error"];
+	    }
+	}
 
 }
 
