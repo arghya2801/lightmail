@@ -88,7 +88,7 @@ func (a *App) SetReaderZoom(zoom int) error {
 func (a *App) ServerLabels() ([]string, error) { return serverLabels(a.config()) }
 
 func (a *App) ChooseSaveDir() (string, error) {
-	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{Title: "Folder for saved newsletters", DefaultDirectory: a.saveDir()})
+	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{Title: "Folder for saved emails", DefaultDirectory: a.saveDir()})
 }
 
 type SyncStatus struct {

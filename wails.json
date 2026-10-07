@@ -1,17 +1,17 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "Newsletters",
-  "outputfilename": "Newsletters",
+  "name": "Lightmail",
+  "outputfilename": "Lightmail",
   "frontend:install": "npm install",
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "info": {
     "companyName": "Arghya Chakrabarty",
-    "productName": "Newsletters",
+    "productName": "Lightmail",
     "productVersion": "1.0.0",
     "copyright": "Copyright 2026 Arghya Chakrabarty",
-    "comments": "A focused reader for the newsletters in your Gmail labels."
+    "comments": "A light, fast Gmail client for reading and sorting mail."
   },
   "author": {
     "name": "Arghya.Chakrabarty",

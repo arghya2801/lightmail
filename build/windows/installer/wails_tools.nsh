@@ -5,13 +5,13 @@
 !include "FileFunc.nsh"
 
 !ifndef INFO_PROJECTNAME
-    !define INFO_PROJECTNAME "Newsletters"
+    !define INFO_PROJECTNAME "Lightmail"
 !endif
 !ifndef INFO_COMPANYNAME
     !define INFO_COMPANYNAME "Arghya Chakrabarty"
 !endif
 !ifndef INFO_PRODUCTNAME
-    !define INFO_PRODUCTNAME "Newsletters"
+    !define INFO_PRODUCTNAME "Lightmail"
 !endif
 !ifndef INFO_PRODUCTVERSION
     !define INFO_PRODUCTVERSION "1.0.0"

@@ -44,7 +44,7 @@ func main() {
 	})
 
 	err = wails.Run(&options.App{
-		Title:            "Newsletters",
+		Title:            "Lightmail",
 		Width:            1320,
 		Height:           860,
 		MinWidth:         900,

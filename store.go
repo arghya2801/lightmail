@@ -28,7 +28,7 @@ type Config struct {
 	ReaderZoom  int      `json:"readerZoom"` // newsletter body zoom in percent
 }
 
-// dataDir picks where settings and the cache live: $NLR_DATA if set; a "data"
+// dataDir picks where settings and the cache live: $LIGHTMAIL_DATA if set; a "data"
 // folder beside the exe when a file named "portable" sits next to it; else %APPDATA%.
 func dataDir() (dir string, portable bool) {
 	if exe, err := os.Executable(); err == nil {
@@ -41,9 +41,9 @@ func dataDir() (dir string, portable bool) {
 		if err != nil {
 			d = "."
 		}
-		dir = filepath.Join(d, "newsletter-reader")
+		dir = filepath.Join(d, "lightmail")
 	}
-	if env := os.Getenv("NLR_DATA"); env != "" { // separate profile, e.g. for testing
+	if env := os.Getenv("LIGHTMAIL_DATA"); env != "" { // separate profile, e.g. for testing
 		dir = env
 	}
 	os.MkdirAll(filepath.Join(dir, "img"), 0o755)
@@ -52,7 +52,7 @@ func dataDir() (dir string, portable bool) {
 
 func loadConfig(dir string, portable bool) Config {
 	home, _ := os.UserHomeDir()
-	save := filepath.Join(home, "Documents", "Newsletters")
+	save := filepath.Join(home, "Documents", "Lightmail")
 	if portable {
 		save = "Saved" // relative to the data folder, so it survives a new drive letter
 	}

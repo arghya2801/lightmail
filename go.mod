@@ -1,4 +1,4 @@
-module newsletter-reader
+module lightmail
 
 go 1.26.0
 
