@@ -42,6 +42,10 @@ export function Open(arg1) {
   return window['go']['main']['App']['Open'](arg1);
 }
 
+export function SaveAttachment(arg1, arg2) {
+  return window['go']['main']['App']['SaveAttachment'](arg1, arg2);
+}
+
 export function SaveConfig(arg1) {
   return window['go']['main']['App']['SaveConfig'](arg1);
 }

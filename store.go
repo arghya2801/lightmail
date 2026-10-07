@@ -142,19 +142,20 @@ func unpack(b []byte) ([]byte, error) {
 }
 
 type Msg struct {
-	ID        int64    `json:"id"`
-	MessageID string   `json:"-"`
-	FromName  string   `json:"fromName"`
-	FromAddr  string   `json:"fromAddr"`
-	To        string   `json:"to"` // display names of To and Cc, comma-separated
-	Subject   string   `json:"subject"`
-	Date      int64    `json:"date"`
-	Size      int64    `json:"-"`
-	Read      bool     `json:"read"`
-	Flagged   bool     `json:"flagged"`
-	HTML      string   `json:"html,omitempty"`
-	Text      string   `json:"-"`
-	Labels    []string `json:"labels,omitempty"` // filled by Open
+	ID          int64        `json:"id"`
+	MessageID   string       `json:"-"`
+	FromName    string       `json:"fromName"`
+	FromAddr    string       `json:"fromAddr"`
+	To          string       `json:"to"` // display names of To and Cc, comma-separated
+	Subject     string       `json:"subject"`
+	Date        int64        `json:"date"`
+	Size        int64        `json:"-"`
+	Read        bool         `json:"read"`
+	Flagged     bool         `json:"flagged"`
+	HTML        string       `json:"html,omitempty"`
+	Text        string       `json:"-"`
+	Labels      []string     `json:"labels,omitempty"`      // filled by Open
+	Attachments []Attachment `json:"attachments,omitempty"` // filled by Open
 }
 
 type Folder struct {

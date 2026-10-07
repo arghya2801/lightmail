@@ -22,6 +22,8 @@ export function Move(arg1:Array<number>,arg2:string,arg3:string):Promise<Array<m
 
 export function Open(arg1:number):Promise<main.Msg>;
 
+export function SaveAttachment(arg1:number,arg2:number):Promise<string>;
+
 export function SaveConfig(arg1:main.Config):Promise<void>;
 
 export function SaveEmail(arg1:number):Promise<string>;

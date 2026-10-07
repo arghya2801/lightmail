@@ -1,5 +1,21 @@
 export namespace main {
 	
+	export class Attachment {
+	    name: string;
+	    type: string;
+	    size: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Attachment(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.type = source["type"];
+	        this.size = source["size"];
+	    }
+	}
 	export class Config {
 	    host: string;
 	    user: string;
@@ -95,6 +111,7 @@ export namespace main {
 	    flagged: boolean;
 	    html?: string;
 	    labels?: string[];
+	    attachments?: Attachment[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Msg(source);
@@ -112,7 +129,26 @@ export namespace main {
 	        this.flagged = source["flagged"];
 	        this.html = source["html"];
 	        this.labels = source["labels"];
+	        this.attachments = this.convertValues(source["attachments"], Attachment);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class Query {
 	    label: string;

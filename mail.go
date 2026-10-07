@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -370,7 +371,16 @@ func (s *Store) pushFlags(ss *session) error {
 	return nil
 }
 
-// ponytail: cid: inline images and attachments are ignored for now.
+type Attachment struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Size int    `json:"size"`
+	data []byte
+}
+
+// parseMsg reads a raw message: headers, the HTML to show (plain text wrapped
+// in <pre> if there is no HTML part, cid: images inlined as data URIs), its
+// visible text for search, and its attachments, in a stable order.
 func parseMsg(raw []byte) (*Msg, error) {
 	mr, err := mail.CreateReader(bytes.NewReader(raw))
 	if mr == nil {
@@ -394,26 +404,53 @@ func parseMsg(raw []byte) (*Msg, error) {
 	}
 
 	var htmlBody, plain string
+	cids := map[string]string{} // Content-ID -> data: URI
 	for {
 		p, err := mr.NextPart()
 		if err == io.EOF || (err != nil && p == nil) {
 			break
 		}
-		ih, ok := p.Header.(*mail.InlineHeader)
-		if !ok {
+		b, _ := io.ReadAll(p.Body)
+		var ct, name string
+		var ph interface{ Get(string) string }
+		switch h := p.Header.(type) {
+		case *mail.AttachmentHeader:
+			ct, _, _ = h.ContentType()
+			name, _ = h.Filename()
+			ph = h
+		case *mail.InlineHeader:
+			var params map[string]string
+			ct, params, _ = h.ContentType()
+			name = params["name"]
+			ph = h
+			if ct == "text/html" && htmlBody == "" {
+				htmlBody = string(b)
+				continue
+			}
+			if ct == "text/plain" && plain == "" {
+				plain = string(b)
+				continue
+			}
+			if strings.HasPrefix(ct, "text/") && name == "" { // a second body part, e.g. a footer
+				continue
+			}
+		default:
 			continue
 		}
-		ct, _, _ := ih.ContentType()
-		b, _ := io.ReadAll(p.Body)
-		switch {
-		case ct == "text/html" && htmlBody == "":
-			htmlBody = string(b)
-		case ct == "text/plain" && plain == "":
-			plain = string(b)
+		if id := strings.Trim(ph.Get("Content-Id"), "<> "); id != "" && strings.HasPrefix(ct, "image/") {
+			cids[id] = "data:" + ct + ";base64," + base64.StdEncoding.EncodeToString(b)
+			continue
 		}
+		if name == "" {
+			name = "attachment"
+		}
+		m.Attachments = append(m.Attachments, Attachment{Name: name, Type: ct, Size: len(b), data: b})
 	}
 	if htmlBody == "" {
 		htmlBody = `<pre style="white-space:pre-wrap;font:inherit">` + html.EscapeString(plain) + `</pre>`
+	}
+	for id, uri := range cids {
+		htmlBody = strings.ReplaceAll(htmlBody, "cid:"+id, uri)
 	}
 	m.HTML = htmlBody
 	m.Text = htmlText(htmlBody)

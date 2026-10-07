@@ -2,7 +2,9 @@
   import { BrowserOpenURL } from '../wailsjs/runtime/runtime'
 
   // actions: [{ label, key, run }] for this message, built by App so the bulk panel shares them.
-  let { msg, actions, chips, onkey, zoom, onzoom, onsave } = $props()
+  let { msg, actions, chips, onkey, zoom, onzoom, onsave, onattach } = $props()
+
+  const kb = (n) => (n < 1024 * 1024 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1024 / 1024).toFixed(1) + ' MB')
 
   let frame = $state()
 
@@ -70,6 +72,13 @@
     {#if chips.length}
       <p class="chips">{#each chips as c}<span class="chip">{c}</span>{/each}</p>
     {/if}
+    {#if msg.attachments?.length}
+      <ul class="files" aria-label="Attachments">
+        {#each msg.attachments as f, i}
+          <li><button onclick={() => onattach(i)} title="Save {f.name}">{f.name} <span class="muted">{kb(f.size)}</span></button></li>
+        {/each}
+      </ul>
+    {/if}
     <div class="actions">
       {#each actions as a (a.label)}<button onclick={a.run} title={a.key}>{a.label}</button>{/each}
       <span class="right">
@@ -101,6 +110,9 @@
   .by { margin: 0 0 12px; }
   .who { color: var(--ink); }
   .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 12px; }
+  .files { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; padding: 0; }
+  .files button { border: 1px solid var(--rule); padding: 3px 10px; }
+  .files .muted { font-size: 12px; margin-left: 4px; }
   .chip { font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--chrome); color: var(--muted); }
   .actions { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-left: -8px; }
   .right { margin-left: auto; display: flex; align-items: center; gap: 4px; }

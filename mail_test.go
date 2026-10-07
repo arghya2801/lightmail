@@ -382,3 +382,30 @@ func TestOldCacheReplaced(t *testing.T) {
 		t.Error("old message_labels kept")
 	}
 }
+
+// TestAttachments: inline cid: images become data URIs and stay out of the
+// attachment list; real attachments are listed in order with their bytes.
+func TestAttachments(t *testing.T) {
+	raw := "From: a@x\r\nSubject: report\r\nMIME-Version: 1.0\r\n" +
+		"Content-Type: multipart/mixed; boundary=M\r\n\r\n" +
+		"--M\r\nContent-Type: multipart/related; boundary=R\r\n\r\n" +
+		"--R\r\nContent-Type: text/html\r\n\r\n<p>Chart:</p><img src=\"cid:chart@x\">\r\n" +
+		"--R\r\nContent-Type: image/png\r\nContent-Id: <chart@x>\r\nContent-Transfer-Encoding: base64\r\n\r\niVBORw==\r\n" +
+		"--R--\r\n" +
+		"--M\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=\"Q3 report.pdf\"\r\n\r\n%PDF-1.4\r\n" +
+		"--M--\r\n"
+	m, err := parseMsg([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(m.HTML, `src="data:image/png;base64,iVBORw=="`) {
+		t.Errorf("cid image not inlined: %s", m.HTML)
+	}
+	if len(m.Attachments) != 1 || m.Attachments[0].Name != "Q3 report.pdf" || m.Attachments[0].Type != "application/pdf" ||
+		string(m.Attachments[0].data) != "%PDF-1.4" {
+		t.Errorf("attachments %+v", m.Attachments)
+	}
+	if out := rewrite(m.HTML, proxied); !strings.Contains(out, "data:image/png") {
+		t.Errorf("rewrite dropped the inlined image: %s", out)
+	}
+}

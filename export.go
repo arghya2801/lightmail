@@ -13,7 +13,11 @@ import (
 func day(unix int64) string { return time.Unix(unix, 0).Format("2006-01-02") }
 
 func fileName(m Msg, ext string) string {
-	name := fmt.Sprintf("%s %s - %s", day(m.Date), m.FromName, m.Subject)
+	return safeName(fmt.Sprintf("%s %s - %s", day(m.Date), m.FromName, m.Subject)) + ext
+}
+
+// safeName drops characters Windows refuses in file names and caps the length.
+func safeName(name string) string {
 	name = strings.Map(func(r rune) rune {
 		if strings.ContainsRune(`<>:"/\|?*`, r) || r < 32 {
 			return -1
@@ -23,7 +27,7 @@ func fileName(m Msg, ext string) string {
 	if r := []rune(name); len(r) > 150 {
 		name = string(r[:150])
 	}
-	return strings.TrimRight(strings.TrimSpace(name), ".") + ext
+	return strings.TrimRight(strings.TrimSpace(name), ".")
 }
 
 // saveEmail writes m to saveDir as self-contained HTML, images inlined.

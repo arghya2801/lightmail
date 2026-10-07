@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { SvelteSet } from 'svelte/reactivity'
   import {
-    GetConfig, GetSyncStatus, Folders, Senders, List, Open, SetFlags, SaveEmail, Sync, SetAppearance, SetReaderZoom,
+    GetConfig, GetSyncStatus, Folders, Senders, List, Open, SetFlags, SaveEmail, SaveAttachment, Sync, SetAppearance, SetReaderZoom,
     Archive, Trash, Spam, Move, AddLabel, DeleteForever, Undo,
   } from '../wailsjs/go/main/App'
   import { EventsOn } from '../wailsjs/runtime/runtime'
@@ -272,6 +272,15 @@
     }
   }
 
+  async function saveAttachment(i) {
+    try {
+      const path = await SaveAttachment(msg.id, i)
+      if (path) flash('Saved to ' + path)
+    } catch (e) {
+      flash("Couldn't save the attachment. " + e)
+    }
+  }
+
   // Keys follow Gmail where Gmail has one.
   const archive = () => role !== 'trash' && role !== 'junk' && role !== 'all' && act('archive')
   const remove = () => act(role === 'trash' || role === 'junk' ? 'forever' : 'trash')
@@ -524,7 +533,7 @@
     {:else if msg}
       {#key msg.id}
         <Reader {msg} {onkey} zoom={readerZoom} onzoom={zoomReader}
-          {actions} onsave={save}
+          {actions} onsave={save} onattach={saveAttachment}
           chips={(msg.labels ?? []).filter((l) => l !== from).map(label)} />
       {/key}
     {:else}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -312,6 +313,7 @@ func (a *App) Open(id int64) (Msg, error) {
 		return m, err
 	}
 	m.HTML = rewrite(p.HTML, proxied)
+	m.Attachments = p.Attachments
 	if m.Labels, err = a.store.labelsOf(id); err != nil {
 		return m, err
 	}
@@ -320,6 +322,31 @@ func (a *App) Open(id int64) (Msg, error) {
 		a.SetFlag(id, `\Seen`, true)
 	}
 	return m, nil
+}
+
+// SaveAttachment asks where to save attachment i of message id and writes it
+// there. It returns the path, or "" if the user cancelled.
+// ponytail: save only; opening attachments in place would mean running unknown files.
+func (a *App) SaveAttachment(id int64, i int) (string, error) {
+	raw, err := a.raw(id)
+	if err != nil {
+		return "", err
+	}
+	p, err := parseMsg(raw)
+	if err != nil {
+		return "", err
+	}
+	if i < 0 || i >= len(p.Attachments) {
+		return "", errors.New("no such attachment")
+	}
+	at := p.Attachments[i]
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title: "Save attachment", DefaultDirectory: a.saveDir(), DefaultFilename: safeName(at.Name),
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	return path, os.WriteFile(path, at.data, 0o644)
 }
 
 func (a *App) SaveEmail(id int64) (string, error) {
