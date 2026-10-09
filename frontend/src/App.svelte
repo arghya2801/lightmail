@@ -10,6 +10,7 @@
   import MailList from './MailList.svelte'
   import Picker from './Picker.svelte'
   import Settings, { zooms } from './Settings.svelte'
+  import { resize } from './resize.js'
 
   let view = $state('reader') // reader | settings
   let q = $state({ label: '', sender: '', search: '', sort: 'new' })
@@ -490,6 +491,7 @@
 
 <div class="app" class:wide={view !== 'reader'} class:table={look.layout === 'table'}>
   <nav class="side">
+    <div class="split x" use:resize={{ name: '--side-w', min: 150, max: 480, label: 'Resize the sidebar' }}></div>
     <div class="scroll">
       {#each system as f (f.name)}
         <div class="branch">{@render folderRow(f, nameOf(f))}</div>
@@ -526,7 +528,7 @@
         <input placeholder="Filter" aria-label="Filter senders" bind:value={senderFilter} />
       </div>
       {#each visibleSenders as s (s.key)}
-        <button class="row" class:on={q.sender === s.key} title={s.key}
+        <button class="row sender" class:on={q.sender === s.key} title={s.key}
           onclick={() => ((q.sender = q.sender === s.key ? '' : s.key), (view = 'reader'))}>
           <span>{s.name}</span>{#if s.unread}<span class="n">{s.unread}</span>{/if}
         </button>
@@ -549,6 +551,11 @@
 
   {#if view === 'reader'}
     <section class="list">
+      {#if look.layout === 'table'}
+        <div class="split y" use:resize={{ name: '--list-h', min: 120, max: 2000, y: true, label: 'Resize the message list' }}></div>
+      {:else}
+        <div class="split x" use:resize={{ name: '--list-w', min: 260, max: 1000, label: 'Resize the message list' }}></div>
+      {/if}
       <div class="tools">
         <input type="search" placeholder="Search all mail" aria-label="Search all mail" bind:this={searchEl} bind:value={q.search} />
         <select bind:value={q.sort} aria-label="Sort">
@@ -630,14 +637,15 @@
     height: calc(100vh / var(--scale, 1)); /* zoom shrinks vh; undo it */
   }
   .app.wide { grid-template-columns: var(--side-w) 1fr; }
-  /* Table layout: the list spans the width above the message; drag its corner to resize. */
+  /* Table layout: the list spans the width above the message. */
   .app.table:not(.wide) { grid-template-columns: var(--side-w) 1fr; grid-template-rows: auto minmax(0, 1fr); }
   .app.table:not(.wide) .side { grid-row: span 2; }
   .app.table:not(.wide) .list {
-    height: calc(42vh / var(--scale, 1)); min-height: 140px; max-height: calc(85vh / var(--scale, 1));
-    resize: vertical; overflow: hidden; border-right: 0; border-bottom: 1px solid var(--rule);
+    height: var(--list-h, calc(42vh / var(--scale, 1))); max-height: calc(85vh / var(--scale, 1));
+    border-right: 0; border-bottom: 1px solid var(--rule);
   }
 
+  .side, .list { position: relative; }
   .side {
     display: flex; flex-direction: column; min-height: 0;
     padding: 16px 8px 8px; border-right: 1px solid var(--rule);
@@ -662,6 +670,7 @@
   }
   .row span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row.on { background: var(--paper); }
+  .row.sender { content-visibility: auto; contain-intrinsic-size: auto 28px; }
   .row.virtual { color: var(--muted); }
   .row.drop { background: var(--drop); box-shadow: inset 0 0 0 1px var(--focus); }
   .n { color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -679,7 +688,7 @@
   .layout button { display: grid; place-items: center; padding: 0 6px; border-radius: 0; color: var(--muted); }
   .layout button.on { background: var(--picked); color: var(--focus); }
 
-  .main { overflow-y: auto; min-height: 0; }
+  .main { overflow-y: auto; min-height: 0; min-width: 0; scrollbar-gutter: stable; } /* fixed width while a message is measured */
   .empty { padding: 32px 24px; }
   .bulk { max-width: 820px; margin: var(--sheet-m) auto; padding: var(--head-p); display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
   .bulk h1 { font: 500 var(--h1-size)/1.15 var(--serif); margin: 0; }

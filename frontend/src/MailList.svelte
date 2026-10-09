@@ -1,5 +1,6 @@
 <script>
   import { slide } from 'svelte/transition'
+  import { resize } from './resize.js'
 
   // selected is a SvelteSet of ids owned by App; current is the open message's id.
   // table adds column headings, which sort by sender or date.
@@ -23,11 +24,17 @@
 
 {#if table}
   <div class="head">
-    <button class="from" class:on={sort === 'sender'} onclick={() => onsort('sender')}>Sender</button>
+    <div class="from">
+      <button class:on={sort === 'sender'} onclick={() => onsort('sender')}>Sender</button>
+      <div class="split x" use:resize={{ name: '--col-from', min: 80, max: 600, label: 'Resize the Sender column' }}></div>
+    </div>
     <span class="subj">Subject</span>
-    <button class="date" class:on={sort === 'new' || sort === 'old'} onclick={() => onsort(sort === 'new' ? 'old' : 'new')}>
-      Date{sort === 'new' ? ' ↓' : sort === 'old' ? ' ↑' : ''}
-    </button>
+    <div class="date">
+      <div class="split x" use:resize={{ name: '--col-date', min: 56, max: 240, invert: true, label: 'Resize the Date column' }}></div>
+      <button class:on={sort === 'new' || sort === 'old'} onclick={() => onsort(sort === 'new' ? 'old' : 'new')}>
+        Date{sort === 'new' ? ' ↓' : sort === 'old' ? ' ↑' : ''}
+      </button>
+    </div>
   </div>
 {/if}
 
@@ -58,6 +65,7 @@
     grid-template-areas: 'pick star from date' 'pick star subj subj';
     padding: var(--row-py) var(--row-px) var(--row-py) 6px; border-bottom: 1px solid var(--rule);
     cursor: default; user-select: none; border-left: 3px solid transparent;
+    content-visibility: auto; contain-intrinsic-size: auto 60px; /* skip layout and paint for rows out of view */
   }
   :global([data-density='compact']) .item {
     grid-template-columns: auto auto minmax(0, 9em) minmax(0, 1fr) auto;
@@ -65,7 +73,7 @@
   }
   /* Table: fixed columns, so rows line up under the headings. */
   .head, .items.table .item {
-    grid-template-columns: 16px 18px minmax(0, 1.2fr) minmax(0, 3fr) 7.5em;
+    grid-template-columns: 16px 18px var(--col-from, minmax(0, 1.2fr)) minmax(0, 3fr) var(--col-date, 7.5em);
     grid-template-areas: 'pick star from subj date';
   }
   /* Same scrollbar gutter on both, so the fr columns match. */
@@ -75,8 +83,10 @@
   .head {
     display: grid; column-gap: 6px; align-items: center;
     padding: 2px var(--row-px) 2px 6px; border-left: 3px solid transparent; border-bottom: 1px solid var(--rule);
-    font-size: 12px; color: var(--muted);
+    font-size: 12px; color: var(--muted); user-select: none;
   }
+  .head > div { position: relative; min-width: 0; overflow: visible; }
+  .head .date .split { left: -6px; right: auto; }
   .head button { padding: 2px 0; border-radius: 0; text-align: left; color: inherit; }
   .head button:hover { background: none; color: var(--ink); }
   .head .on { color: var(--ink); font-weight: 600; }

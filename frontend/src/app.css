@@ -75,3 +75,11 @@ input, select, textarea {
 
 .muted { color: var(--muted); }
 .serif { font-family: var(--serif); }
+
+/* Drag handles on pane edges and table headings (see resize.js). Invisible until hovered. */
+.split { position: absolute; z-index: 5; touch-action: none; }
+.split.x { top: 0; bottom: 0; right: -3px; width: 6px; cursor: col-resize; }
+.split.y { left: 0; right: 0; bottom: -3px; height: 6px; cursor: row-resize; }
+.split:focus-visible { outline: none; }
+.split.x:hover, .split.x:focus-visible, .split.x.dragging { background: linear-gradient(to right, transparent 2px, var(--focus) 2px 4px, transparent 4px); }
+.split.y:hover, .split.y:focus-visible, .split.y.dragging { background: linear-gradient(to bottom, transparent 2px, var(--focus) 2px 4px, transparent 4px); }
