@@ -2,6 +2,8 @@
 
 A small, fast Gmail client for Windows, for reading and sorting mail rather than writing it. It syncs the folders and labels you pick over IMAP, keeps headers in a local SQLite cache, and downloads a message body the first time you open it. You can archive, delete, report spam, star, mark read, move messages between labels (drag and drop works) and manage labels. Changes go to Gmail straight away. There is no compose or reply; use Gmail for that.
 
+Lightmail grew out of [Newsletters](https://github.com/arghya2801/email_newsletter_reader), a stripped-down sibling that only reads newsletter labels.
+
 ## Install
 
 Two builds, same app:
