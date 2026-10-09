@@ -27,23 +27,34 @@ Click a message to open it. Ctrl+click, Shift+click, the checkbox that appears o
 
 Right-click a label to rename it, delete it, or create one inside it. The + next to Labels creates a top-level one.
 
-| Key | Action |
-| --- | --- |
-| `j` / `k` | Next / previous message |
-| `x` | Select or deselect the open message |
-| `Ctrl+A` / `Esc` | Select all loaded messages / clear the selection |
-| `e` | Archive |
-| `#` or `Delete` | Delete (in Trash or Spam: delete forever) |
-| `!` | Report spam (in Spam: not spam) |
-| `v` / `l` | Move to… / Add label… |
-| `s` | Star or unstar |
-| `Shift+I` / `Shift+U` | Mark read / unread |
-| `Shift+S` | Save the message as HTML |
-| `/` | Search all mail (subject and sender; body text for messages you've opened) |
-| `r` | Sync now |
-| `g i` / `g s` | Inbox / Settings |
-| `Ctrl+Plus` / `Minus` / `0`, `Ctrl`+scroll | Zoom the message only (remembered; click the % to reset) |
-| `Ctrl+Shift+Plus` / `Minus` / `0` | Zoom the whole app |
+Every action has a key on the left half of the keyboard. Gmail's keys work too; they're in the second column.
+
+| Left hand | Also | Action |
+| --- | --- | --- |
+| `f` / `d` | `j` / `k` | Next / previous message |
+| `Space` / `Shift+Space` | | Page down / up through the message; at the end, Space opens the next one |
+| `e` | | Archive |
+| `#` | `Delete` | Delete (in Trash or Spam: delete forever) |
+| `!` | | Report spam (in Spam: not spam) |
+| `z` | | Undo the last move or delete, while its toast is showing |
+| `v` | | Move to… |
+| `c` | `l` | Add label… |
+| `s` | | Star or unstar |
+| `t` | `Shift+I` / `Shift+U` | Mark read or unread (toggles) |
+| `x` | | Select or deselect the open message |
+| `Ctrl+A` / `Esc` | | Select all loaded messages / clear the selection |
+| `Ctrl+F` | `/` | Search all mail (subject and sender; body text for messages you've opened). `Esc` leaves the box |
+| `g 1` … `g 9` | | Open the nth folder in the sidebar (`g 1` is the Inbox) |
+| `g f` | `g l` | Go to any folder or label |
+| `g s` | | Settings |
+| | `g i` | Inbox |
+| `Shift+T` | | Switch between Cards and Table |
+| `r` | | Sync now |
+| `Shift+S` | | Save the message as HTML |
+| `Ctrl+Plus` / `Minus` / `0`, `Ctrl`+scroll | | Zoom the message only (remembered; click the % to reset) |
+| `Ctrl+Shift+Plus` / `Minus` / `0` | | Zoom the whole app |
+
+In the Move, Label and Go to boxes, type to filter, or press `Tab` / `Shift+Tab` to step through the folders and `Space` to pick one. `Esc` closes the box.
 
 What the actions do in Gmail: archive removes the Inbox label, and the message stays in All Mail. Delete moves it to Trash, which Gmail empties after 30 days. Moving between labels swaps one label for the other. Filing a message from All Mail adds the label instead, because in Gmail a move out of All Mail deletes.
 

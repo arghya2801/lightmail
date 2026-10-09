@@ -30,6 +30,7 @@
   let toast = $state(null)
   let searchEl = $state()
   let listEl = $state()
+  let mainEl = $state()
   let chipEl = $state()
 
   const sorts = [['new', 'Newest first'], ['old', 'Oldest first'], ['sender', 'Sender A–Z'], ['unread', 'Unread first']]
@@ -396,6 +397,22 @@
     SetReaderZoom(readerZoom)
   }
 
+  // Folders in sidebar order, for g 1–9 and the Go to picker.
+  let sideOrder = $derived([
+    ...system.map((f) => f.name),
+    ...(system.some((f) => f.role === 'all') ? [] : ['']),
+    ...tree.filter((r) => r.folder).map((r) => r.path),
+    ...bin.map((f) => f.name),
+  ])
+
+  // Space pages through the open message, then moves to the next one.
+  function page(d) {
+    const el = mainEl
+    if (!el || !msg) return d > 0 && step(1)
+    if (d > 0 && el.scrollTop + el.clientHeight >= el.scrollHeight - 2) return step(1)
+    el.scrollBy({ top: d * el.clientHeight * 0.85 })
+  }
+
   let gPending = false
   function onkey(e) {
     if ((e.ctrlKey || e.metaKey) && !e.altKey && e.code in zoomKeys) {
@@ -415,16 +432,26 @@
       for (const m of items) selected.add(m.id)
       return
     }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+      e.preventDefault()
+      return searchEl?.focus()
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) return
     if (gPending) {
       gPending = false
+      e.preventDefault() // or the f of g f lands in the picker it opens
       if (e.key === 'i' && roleFolder('inbox')) go(roleFolder('inbox'))
       if (e.key === 's') view = 'settings'
+      if (e.key === 'f' || e.key === 'l') picker = 'go'
+      if (e.key >= '1' && e.key <= '9' && sideOrder[e.key - 1] !== undefined) go(sideOrder[e.key - 1])
       return
     }
     const keys = {
       j: () => step(1),
       k: () => step(-1),
+      f: () => step(1), // f / d: next / previous, for the left hand
+      d: () => step(-1),
+      ' ': () => page(e.shiftKey ? -1 : 1),
       x: () => msg && toggle(msg),
       e: archive,
       '#': remove,
@@ -432,6 +459,10 @@
       '!': spam,
       v: () => targets().length && (picker = 'move'),
       l: () => targets().length && (picker = 'label'),
+      c: () => targets().length && (picker = 'label'),
+      t: () => setRead(),
+      T: () => setLook({ layout: look.layout === 'table' ? 'cards' : 'table' }),
+      z: () => toast?.action && (toast.fn(), (toast = null)),
       s: () => setStar(),
       I: () => setRead(true),
       U: () => setRead(false),
@@ -583,7 +614,7 @@
     </section>
   {/if}
 
-  <main class="main">
+  <main class="main" bind:this={mainEl}>
     {#if view === 'settings'}
       <Settings onsaved={() => { view = 'reader'; Sync() }} {look} onlook={setLook} />
     {:else if selected.size > 1}
@@ -601,13 +632,15 @@
           chips={(msg.labels ?? []).filter((l) => l !== from).map(label)} />
       {/key}
     {:else}
-      <p class="empty muted">Pick a message {look.layout === 'table' ? 'above' : 'on the left'}, or press j.</p>
+      <p class="empty muted">Pick a message {look.layout === 'table' ? 'above' : 'on the left'}, or press f.</p>
     {/if}
   </main>
 
   {#if picker}
-    <Picker title={picker === 'move' ? 'Move to' : 'Add label'} folders={picker === 'move' ? pickable : pickable.filter((f) => !byName[f.name]?.role)}
-      onclose={() => (picker = null)} onpick={(name) => { const kind = picker; picker = null; act(kind, name) }} />
+    <Picker title={{ move: 'Move to', label: 'Add label', go: 'Go to' }[picker]}
+      folders={picker === 'go' ? sideOrder.map((name) => ({ name, label: name ? label(name) : 'All mail' }))
+        : picker === 'move' ? pickable : pickable.filter((f) => !byName[f.name]?.role)}
+      onclose={() => (picker = null)} onpick={(name) => { const kind = picker; picker = null; kind === 'go' ? go(name) : act(kind, name) }} />
   {/if}
 
   {#if toast}
