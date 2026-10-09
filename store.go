@@ -24,6 +24,7 @@ type Config struct {
 	SaveDir     string   `json:"saveDir"`
 	SyncMinutes int      `json:"syncMinutes"`
 	Density     string   `json:"density"`    // "comfortable" or "compact"
+	Layout      string   `json:"layout"`     // "cards" (list beside the message) or "table" (columns above it)
 	Scale       int      `json:"scale"`      // interface size in percent
 	ReaderZoom  int      `json:"readerZoom"` // message body zoom in percent
 	// Remote images are tracking beacons as often as pictures, so they load
@@ -60,7 +61,7 @@ func loadConfig(dir string, portable bool) Config {
 	if portable {
 		save = "Saved" // relative to the data folder, so it survives a new drive letter
 	}
-	c := Config{Host: "imap.gmail.com:993", SaveDir: save, SyncMinutes: 15, Density: "comfortable", Scale: 100, ReaderZoom: 100}
+	c := Config{Host: "imap.gmail.com:993", SaveDir: save, SyncMinutes: 15, Density: "comfortable", Layout: "cards", Scale: 100, ReaderZoom: 100}
 	if b, err := os.ReadFile(filepath.Join(dir, "config.json")); err == nil {
 		json.Unmarshal(b, &c)
 	}

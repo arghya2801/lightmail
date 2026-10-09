@@ -47,7 +47,7 @@ What the actions do in Gmail: archive removes the Inbox label, and the message s
 
 Remote images stay hidden until you click **Load images** or **Always for this sender**, because images double as read receipts. Settings can turn this off. Attachments appear under the message header; click one to save it. Inline images in the message itself always show. Scripts in mail never run.
 
-Settings → Appearance switches between Comfortable (two-line rows) and Compact (one line per message), and sets the app zoom from 80% to 150%.
+Settings → Appearance switches between Comfortable (two-line rows) and Compact (one line per message), and sets the app zoom from 80% to 150%. Layout picks Cards (the list beside the message) or Table (sender, subject and date in columns above the message; click Sender or Date to sort, drag the list's bottom corner to resize). The two buttons next to Sort switch layouts too, and the choice is remembered.
 
 ## Where things live
 

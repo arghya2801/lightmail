@@ -2,7 +2,8 @@
   import { slide } from 'svelte/transition'
 
   // selected is a SvelteSet of ids owned by App; current is the open message's id.
-  let { items, selected, current, onpick, ontoggle, onstar, ondragstart, onmore, el = $bindable(), empty } = $props()
+  // table adds column headings, which sort by sender or date.
+  let { items, selected, current, onpick, ontoggle, onstar, ondragstart, onmore, el = $bindable(), empty, table, sort, onsort } = $props()
 
   const year = new Date().getFullYear()
   const fmtDate = (s) => {
@@ -20,7 +21,17 @@
   }
 </script>
 
-<div class="items" class:selecting={selected.size > 0} bind:this={el} {onscroll} role="listbox" aria-multiselectable="true" aria-label="Messages">
+{#if table}
+  <div class="head">
+    <button class="from" class:on={sort === 'sender'} onclick={() => onsort('sender')}>Sender</button>
+    <span class="subj">Subject</span>
+    <button class="date" class:on={sort === 'new' || sort === 'old'} onclick={() => onsort(sort === 'new' ? 'old' : 'new')}>
+      Date{sort === 'new' ? ' ↓' : sort === 'old' ? ' ↑' : ''}
+    </button>
+  </div>
+{/if}
+
+<div class="items" class:table class:selecting={selected.size > 0} bind:this={el} {onscroll} role="listbox" aria-multiselectable="true" aria-label="Messages">
   {#each items as m (m.id)}
     <div class="item" class:unread={!m.read} class:open={current === m.id} class:picked={selected.has(m.id)}
       data-id={m.id} role="option" aria-selected={selected.has(m.id) || current === m.id} tabindex="-1" draggable="true"
@@ -52,6 +63,24 @@
     grid-template-columns: auto auto minmax(0, 9em) minmax(0, 1fr) auto;
     grid-template-areas: 'pick star from subj date';
   }
+  /* Table: fixed columns, so rows line up under the headings. */
+  .head, .items.table .item {
+    grid-template-columns: 16px 18px minmax(0, 1.2fr) minmax(0, 3fr) 7.5em;
+    grid-template-areas: 'pick star from subj date';
+  }
+  /* Same scrollbar gutter on both, so the fr columns match. */
+  .head, .items.table { overflow-y: hidden; scrollbar-gutter: stable; }
+  .items.table { overflow-y: auto; }
+  .items.table .item { padding-top: calc(var(--row-py) * 0.6); padding-bottom: calc(var(--row-py) * 0.6); }
+  .head {
+    display: grid; column-gap: 6px; align-items: center;
+    padding: 2px var(--row-px) 2px 6px; border-left: 3px solid transparent; border-bottom: 1px solid var(--rule);
+    font-size: 12px; color: var(--muted);
+  }
+  .head button { padding: 2px 0; border-radius: 0; text-align: left; color: inherit; }
+  .head button:hover { background: none; color: var(--ink); }
+  .head .on { color: var(--ink); font-weight: 600; }
+  .head .date, .items.table .date { text-align: right; }
   .item:hover { background: color-mix(in srgb, var(--paper) 50%, var(--chrome)); }
   .item:focus-visible { outline: none; } /* j/k and the open highlight show where you are */
   .item.open { background: var(--paper); }

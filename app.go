@@ -87,13 +87,16 @@ func (a *App) SaveConfig(c Config) error {
 }
 
 // SetAppearance saves only the display settings, so unsaved account edits stay unsaved.
-func (a *App) SetAppearance(density string, scale int) error {
+func (a *App) SetAppearance(density, layout string, scale int) error {
 	if density != "compact" {
 		density = "comfortable"
 	}
+	if layout != "table" {
+		layout = "cards"
+	}
 	scale = min(max(scale, 80), 150)
 	a.mu.Lock()
-	a.cfg.Density, a.cfg.Scale = density, scale
+	a.cfg.Density, a.cfg.Layout, a.cfg.Scale = density, layout, scale
 	c := a.cfg
 	a.mu.Unlock()
 	return saveConfig(a.dir, c)

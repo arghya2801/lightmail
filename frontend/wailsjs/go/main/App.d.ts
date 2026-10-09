@@ -40,7 +40,7 @@ export function Senders(arg1:string):Promise<Array<main.Count>>;
 
 export function ServerFolders():Promise<Array<main.ServerFolder>>;
 
-export function SetAppearance(arg1:string,arg2:number):Promise<void>;
+export function SetAppearance(arg1:string,arg2:string,arg3:number):Promise<void>;
 
 export function SetFlag(arg1:number,arg2:string,arg3:boolean):Promise<void>;
 

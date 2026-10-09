@@ -388,7 +388,7 @@
     const i = levels.indexOf(cur)
     return d === 0 ? 100 : levels[Math.min(Math.max((i < 0 ? levels.indexOf(100) : i) + d, 0), levels.length - 1)]
   }
-  const zoomApp = (d) => setLook(look.density, zoomStep(zooms, look.scale, d))
+  const zoomApp = (d) => setLook({ scale: zoomStep(zooms, look.scale, d) })
   let readerZoom = $state(100)
   function zoomReader(d) {
     readerZoom = zoomStep(readerZooms, readerZoom, d)
@@ -446,23 +446,23 @@
     }
   }
 
-  // Density and text size apply to the whole document, so Settings can preview them live.
-  let look = $state({ density: 'comfortable', scale: 100 })
-  function appearance(density, scale) {
-    look = { density: density || 'comfortable', scale: scale || 100 }
+  // Density, layout and text size apply straight away, so Settings can preview them live.
+  let look = $state({ density: 'comfortable', layout: 'cards', scale: 100 })
+  function appearance(l) {
+    look = { density: l.density || 'comfortable', layout: l.layout === 'table' ? 'table' : 'cards', scale: l.scale || 100 }
     const root = document.documentElement
     root.dataset.density = look.density
     root.style.zoom = look.scale / 100
     root.style.setProperty('--scale', look.scale / 100)
   }
-  function setLook(density, scale) {
-    appearance(density, scale)
-    SetAppearance(look.density, look.scale)
+  function setLook(change) {
+    appearance({ ...look, ...change })
+    SetAppearance(look.density, look.layout, look.scale)
   }
 
   onMount(async () => {
     const cfg = await GetConfig()
-    appearance(cfg.density, cfg.scale)
+    appearance(cfg)
     readerZoom = cfg.readerZoom || 100
     if (!cfg.password || !cfg.labels?.length) view = 'settings'
     counts()
@@ -488,7 +488,7 @@
   </button>
 {/snippet}
 
-<div class="app" class:wide={view !== 'reader'}>
+<div class="app" class:wide={view !== 'reader'} class:table={look.layout === 'table'}>
   <nav class="side">
     <div class="scroll">
       {#each system as f (f.name)}
@@ -554,8 +554,17 @@
         <select bind:value={q.sort} aria-label="Sort">
           {#each sorts as [v, text]}<option value={v}>{text}</option>{/each}
         </select>
+        <div class="layout" role="radiogroup" aria-label="Layout">
+          {#each [['cards', 'Cards beside the message', 'M2 3h12M2 6h8M2 10h12M2 13h8'], ['table', 'Table above the message', 'M1.5 3h13M1.5 6.5h13M1.5 10h13M1.5 13.5h13M5.5 1.5v13']] as [v, text, d]}
+            <button role="radio" aria-checked={look.layout === v} aria-label={text} title={text} class:on={look.layout === v}
+              onclick={() => setLook({ layout: v })}>
+              <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path {d} stroke="currentColor" stroke-width="1.3" fill="none" /></svg>
+            </button>
+          {/each}
+        </div>
       </div>
       <MailList {items} {selected} current={msg?.id} bind:el={listEl} onpick={pick} ontoggle={toggle} onstar={star} ondragstart={dragstart}
+        table={look.layout === 'table'} sort={q.sort} onsort={(s) => (q.sort = s)}
         onmore={() => more && ((more = false), load(false))}>
         {#snippet empty()}
           {#if q.search || q.sender}Nothing matches. Clear the search or pick another sender.
@@ -585,7 +594,7 @@
           chips={(msg.labels ?? []).filter((l) => l !== from).map(label)} />
       {/key}
     {:else}
-      <p class="empty muted">Pick a message on the left, or press j.</p>
+      <p class="empty muted">Pick a message {look.layout === 'table' ? 'above' : 'on the left'}, or press j.</p>
     {/if}
   </main>
 
@@ -621,6 +630,13 @@
     height: calc(100vh / var(--scale, 1)); /* zoom shrinks vh; undo it */
   }
   .app.wide { grid-template-columns: var(--side-w) 1fr; }
+  /* Table layout: the list spans the width above the message; drag its corner to resize. */
+  .app.table:not(.wide) { grid-template-columns: var(--side-w) 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .app.table:not(.wide) .side { grid-row: span 2; }
+  .app.table:not(.wide) .list {
+    height: calc(42vh / var(--scale, 1)); min-height: 140px; max-height: calc(85vh / var(--scale, 1));
+    resize: vertical; overflow: hidden; border-right: 0; border-bottom: 1px solid var(--rule);
+  }
 
   .side {
     display: flex; flex-direction: column; min-height: 0;
@@ -659,6 +675,9 @@
   .list { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--rule); }
   .tools { display: flex; gap: 8px; padding: var(--tools-p); border-bottom: 1px solid var(--rule); }
   .tools input { flex: 1; min-width: 0; }
+  .layout { display: flex; flex: none; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); }
+  .layout button { display: grid; place-items: center; padding: 0 6px; border-radius: 0; color: var(--muted); }
+  .layout button.on { background: var(--picked); color: var(--focus); }
 
   .main { overflow-y: auto; min-height: 0; }
   .empty { padding: 32px 24px; }

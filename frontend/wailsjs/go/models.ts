@@ -24,6 +24,7 @@ export namespace main {
 	    saveDir: string;
 	    syncMinutes: number;
 	    density: string;
+	    layout: string;
 	    scale: number;
 	    readerZoom: number;
 	    allImages: boolean;
@@ -42,6 +43,7 @@ export namespace main {
 	        this.saveDir = source["saveDir"];
 	        this.syncMinutes = source["syncMinutes"];
 	        this.density = source["density"];
+	        this.layout = source["layout"];
 	        this.scale = source["scale"];
 	        this.readerZoom = source["readerZoom"];
 	        this.allImages = source["allImages"];

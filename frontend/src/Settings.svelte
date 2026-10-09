@@ -66,17 +66,23 @@
         <span class="muted">Density</span>
         <div class="seg" role="radiogroup" aria-label="Density">
           {#each [['comfortable', 'Comfortable'], ['compact', 'Compact']] as [v, label]}
-            <label><input type="radio" name="density" value={v} checked={look.density === v} onchange={() => onlook(v, look.scale)} /> {label}</label>
+            <label><input type="radio" name="density" value={v} checked={look.density === v} onchange={() => onlook({ density: v })} /> {label}</label>
+          {/each}
+        </div>
+        <span class="muted">Layout</span>
+        <div class="seg" role="radiogroup" aria-label="Layout">
+          {#each [['cards', 'Cards'], ['table', 'Table']] as [v, label]}
+            <label><input type="radio" name="layout" value={v} checked={look.layout === v} onchange={() => onlook({ layout: v })} /> {label}</label>
           {/each}
         </div>
         <span class="muted">Zoom</span>
         <div class="seg" role="radiogroup" aria-label="Zoom">
           {#each zooms as v}
-            <label><input type="radio" name="scale" value={v} checked={look.scale === v} onchange={() => onlook(look.density, v)} /> {v}%</label>
+            <label><input type="radio" name="scale" value={v} checked={look.scale === v} onchange={() => onlook({ scale: v })} /> {v}%</label>
           {/each}
         </div>
       </div>
-      <span class="hint muted">Compact fits more mail on screen: narrower panes and tighter rows. Zoom scales the whole app; Ctrl+Shift+Plus / Minus / 0 work anywhere. Changes apply immediately.</span>
+      <span class="hint muted">Compact fits more mail on screen: narrower panes and tighter rows. Cards lists mail beside the open message; Table shows sender, subject and date in columns above it (the buttons beside Sort switch too). Zoom scales the whole app; Ctrl+Shift+Plus / Minus / 0 work anywhere. Changes apply immediately.</span>
     </fieldset>
 
     {#if !cfg.password}

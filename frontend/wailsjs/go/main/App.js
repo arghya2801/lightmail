@@ -78,8 +78,8 @@ export function ServerFolders() {
   return window['go']['main']['App']['ServerFolders']();
 }
 
-export function SetAppearance(arg1, arg2) {
-  return window['go']['main']['App']['SetAppearance'](arg1, arg2);
+export function SetAppearance(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SetAppearance'](arg1, arg2, arg3);
 }
 
 export function SetFlag(arg1, arg2, arg3) {
