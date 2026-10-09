@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"compress/flate"
 	"database/sql"
 	"encoding/json"
@@ -62,6 +63,13 @@ func loadConfig(dir string, portable bool) Config {
 	c := Config{Host: "imap.gmail.com:993", SaveDir: save, SyncMinutes: 15, Density: "comfortable", Scale: 100, ReaderZoom: 100}
 	if b, err := os.ReadFile(filepath.Join(dir, "config.json")); err == nil {
 		json.Unmarshal(b, &c)
+	}
+	if b, err := os.ReadFile(filepath.Join(filepath.Dir(dir), "newsletter-reader", "config.json")); err == nil && c.User == "" {
+		// Not signed in yet beside the Newsletters app: reuse its sign-in, not its folders.
+		var old Config
+		if json.Unmarshal(b, &old) == nil && old.User != "" {
+			c.Host, c.User, c.Password = cmp.Or(old.Host, c.Host), old.User, old.Password
+		}
 	}
 	return c
 }
