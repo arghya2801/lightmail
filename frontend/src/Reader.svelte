@@ -137,5 +137,8 @@
   .blocked .muted { margin-right: auto; }
   .blocked button { border: 1px solid var(--rule); }
   .error { margin: 0; padding: 16px 40px 24px; border-top: 1px solid var(--rule); color: var(--muted); }
-  iframe { display: block; width: 100%; height: 150px; border: 0; border-top: 1px solid var(--rule); background: #fff; }
+  /* Mail is shown on white, so it must see a light theme too: inside the frame,
+     prefers-color-scheme follows this color-scheme. Dark-mode rules in mail
+     (white links, say) would otherwise land on white. */
+  iframe { display: block; width: 100%; height: 150px; border: 0; border-top: 1px solid var(--rule); background: #fff; color-scheme: light; }
 </style>
