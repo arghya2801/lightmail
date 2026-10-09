@@ -23,6 +23,9 @@ func main() {
 	}
 	app := NewApp(dir, portable, store)
 	win := &windows.Options{}
+	// No GPU process: about 70 MB less memory (246 to 176 MB private, measured) for
+	// roughly 20% more renderer CPU while moving between messages. Text mail doesn't need it.
+	win.WebviewGpuIsDisabled = true
 	if portable { // keep WebView2's cache beside the exe too
 		win.WebviewUserDataPath = filepath.Join(dir, "webview")
 	}
