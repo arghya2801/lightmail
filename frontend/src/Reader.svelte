@@ -17,6 +17,10 @@
   // Size the frame to its content so the pane scrolls, not the frame. Zoom is applied
   // inside the frame; fixed-width mail zoomed past the pane widens it instead of clipping.
   // Measures from zero (scrollHeight never reports less than the frame) and keeps the reading spot.
+  // settled is the body size fit left behind: a resize back to it is fit's own doing, and
+  // refitting on it loops forever on mail whose layout depends on the pane's scrollbar.
+  let settled = ''
+  const size = (b) => `${b.offsetWidth}x${b.offsetHeight}`
   function fit() {
     const el = frame?.contentDocument?.documentElement
     if (!el) return
@@ -29,6 +33,7 @@
     frame.style.minWidth = el.scrollWidth > el.clientWidth ? el.scrollWidth + 'px' : ''
     frame.style.height = el.scrollHeight + 'px'
     if (pane && read > 0 && before) pane.scrollTop = top + (read * frame.offsetHeight) / before
+    if (frame.contentDocument.body) settled = size(frame.contentDocument.body)
   }
   $effect(() => {
     zoom
@@ -50,7 +55,7 @@
   function loaded() {
     const doc = frame.contentDocument
     fit()
-    new ResizeObserver(fit).observe(doc.body)
+    new ResizeObserver(() => size(doc.body) !== settled && fit()).observe(doc.body)
     doc.addEventListener('wheel', onwheel, { passive: false })
     doc.addEventListener('click', (e) => {
       const a = e.target.closest?.('a[href]')
