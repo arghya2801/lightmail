@@ -8,10 +8,10 @@ Lightmail grew out of [Newsletters](https://github.com/arghya2801/email_newslett
 
 Two builds, same app:
 
-- **Installer** (`Lightmail-amd64-installer.exe`) installs for your user only, with no admin prompt, into `%LOCALAPPDATA%\Programs\Lightmail`. It adds Start menu and desktop shortcuts and shows up in Settings → Apps for uninstalling. Uninstalling keeps your settings and cache.
+- **Installer** (`Lightmail-installer.msi`) installs for your user only, with no admin prompt, into `%LOCALAPPDATA%\Programs\Lightmail`. It adds Start menu and desktop shortcuts and shows up in Settings → Apps for uninstalling. Installing a newer version replaces the old one. Uninstalling keeps your settings and cache.
 - **Portable** (`Lightmail-portable.zip`): unzip anywhere, including a USB stick, and run `Lightmail.exe`. The `portable` file next to it keeps everything in a `data` folder beside the exe. Delete `portable` to use `%APPDATA%` instead.
 
-Both need the WebView2 runtime, which ships with Windows 11. The installer adds it if it's missing.
+Both need the WebView2 runtime, which ships with Windows 11. On Windows 10, get it from <https://developer.microsoft.com/microsoft-edge/webview2/> if Lightmail won't start.
 
 ## Setup
 
@@ -75,7 +75,7 @@ Requires Go 1.26+, Node 20+, and the Wails CLI (`go install github.com/wailsapp/
 ```sh
 wails dev            # live reload
 wails build          # build/bin/Lightmail.exe
-./build.ps1          # installer + portable zip in build/bin (needs NSIS: winget install NSIS.NSIS)
+./build.ps1          # installer + portable zip in build/bin (needs WiX 3: unzip wix314-binaries.zip from github.com/wixtoolset/wix3/releases into %LOCALAPPDATA%\wix314)
 go test ./...        # parsing, sync, reconcile, every action, IDLE, against an in-memory IMAP server
 ```
 

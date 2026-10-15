@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Per-user MSI: installs to %LOCALAPPDATA%\Programs\Lightmail with no admin prompt. Built by build.ps1. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="Lightmail" Language="1033" Version="$(var.Version)"
+           Manufacturer="Arghya Chakrabarty" UpgradeCode="6B0C1F52-3E7A-4C59-9C1B-2F4D8A6E7B31">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perUser" InstallPrivileges="limited" />
+    <MajorUpgrade DowngradeErrorMessage="A newer Lightmail is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="Lightmail.ico" SourceFile="$(var.Icon)" />
+    <Property Id="ARPPRODUCTICON" Value="Lightmail.ico" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="ProgramsDir" Name="Programs">
+          <Directory Id="INSTALLDIR" Name="Lightmail" />
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder" />
+      <Directory Id="DesktopFolder" />
+    </Directory>
+
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="App" Guid="A3E5D7C1-8B2F-4E6A-9D0C-5F1B3A7E9C24">
+        <File Id="LightmailExe" Source="$(var.Exe)" />
+        <Shortcut Id="StartMenu" Directory="ProgramMenuFolder" Name="Lightmail" Target="[#LightmailExe]" WorkingDirectory="INSTALLDIR" />
+        <Shortcut Id="Desktop" Directory="DesktopFolder" Name="Lightmail" Target="[#LightmailExe]" WorkingDirectory="INSTALLDIR" />
+        <RemoveFolder Id="RemoveInstallDir" On="uninstall" />
+        <RemoveFolder Id="RemoveProgramsDir" Directory="ProgramsDir" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\Lightmail" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="Main" Title="Lightmail">
+      <ComponentRef Id="App" />
+    </Feature>
+  </Product>
+</Wix>
