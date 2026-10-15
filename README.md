@@ -80,4 +80,6 @@ wails build          # build/bin/Lightmail.exe
 go test ./...        # parsing, sync, reconcile, every action, IDLE, against an in-memory IMAP server
 ```
 
+To release, set `productVersion` in `wails.json`, commit, then push a matching tag (`git tag v1.0.0 && git push origin v1.0.0`). GitHub Actions runs the tests, builds the MSI and the portable zip, and attaches them to a draft release for you to review and publish.
+
 Known limits, marked `ponytail:` in the code: one SQLite connection serialises all queries; an action made while a sync is running can look undone until the next sync; attachments save but don't open in place; the image cache never evicts.
