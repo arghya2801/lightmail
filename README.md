@@ -23,11 +23,11 @@ The first sync fetches headers only, so even a large mailbox lists in a minute o
 
 ## Using it
 
-Click a message to open it. Ctrl+click, Shift+click, the checkbox that appears on hover, or `x` select several; the toolbar then acts on all of them. Drag messages onto a label in the sidebar to move them there, or hold Ctrl while dropping to add the label and leave them where they are. Dropping on Trash deletes, on Spam reports spam, on All Mail archives. Every move and delete can be undone from the toast that follows.
+Click a message to open it. Ctrl+click, Shift+click, the checkbox that appears on hover, or `x` select several; the toolbar then acts on all of them. Drag messages onto a label in the sidebar to move them there, or hold Ctrl while dropping to add the label and leave them where they are. Dropping on Trash deletes, on Spam reports spam, on All Mail archives. Every move and delete can be undone from the toast that follows. Errors stay until you dismiss them, and the window title shows the Inbox's unread count.
 
 Right-click a label to rename it, delete it, or create one inside it. The + next to Labels creates a top-level one.
 
-Every action has a key on the left half of the keyboard. Gmail's keys work too; they're in the second column.
+Every action has a key on the left half of the keyboard. Gmail's keys work too; they're in the second column. Press `?` in the app for this list, or hover a button to see its key.
 
 | Left hand | Also | Action |
 | --- | --- | --- |
@@ -53,6 +53,7 @@ Every action has a key on the left half of the keyboard. Gmail's keys work too; 
 | `Shift+S` | | Save the message as HTML |
 | `Ctrl+Plus` / `Minus` / `0`, `Ctrl`+scroll | | Zoom the message only (remembered; click the % to reset) |
 | `Ctrl+Shift+Plus` / `Minus` / `0` | | Zoom the whole app |
+| `?` | | Show every key |
 
 In the Move, Label and Go to boxes, type to filter, or press `Tab` / `Shift+Tab` to step through the folders and `Space` to pick one. `Esc` closes the box.
 

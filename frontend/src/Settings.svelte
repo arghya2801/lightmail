@@ -60,30 +60,6 @@
 {#if cfg}
   <form class="settings" onsubmit={save}>
     <h1>Settings</h1>
-    <fieldset>
-      <legend>Appearance</legend>
-      <div class="look">
-        <span class="muted">Density</span>
-        <div class="seg" role="radiogroup" aria-label="Density">
-          {#each [['comfortable', 'Comfortable'], ['compact', 'Compact']] as [v, label]}
-            <label><input type="radio" name="density" value={v} checked={look.density === v} onchange={() => onlook({ density: v })} /> {label}</label>
-          {/each}
-        </div>
-        <span class="muted">Layout</span>
-        <div class="seg" role="radiogroup" aria-label="Layout">
-          {#each [['cards', 'Cards'], ['table', 'Table']] as [v, label]}
-            <label><input type="radio" name="layout" value={v} checked={look.layout === v} onchange={() => onlook({ layout: v })} /> {label}</label>
-          {/each}
-        </div>
-        <span class="muted">Zoom</span>
-        <div class="seg" role="radiogroup" aria-label="Zoom">
-          {#each zooms as v}
-            <label><input type="radio" name="scale" value={v} checked={look.scale === v} onchange={() => onlook({ scale: v })} /> {v}%</label>
-          {/each}
-        </div>
-      </div>
-      <span class="hint muted">Compact fits more mail on screen: narrower panes and tighter rows. Cards lists mail beside the open message; Table shows sender, subject and date in columns above it (the buttons beside Sort switch too). Zoom scales the whole app; Ctrl+Shift+Plus / Minus / 0 work anywhere. Changes apply immediately.</span>
-    </fieldset>
 
     {#if !cfg.password}
       <p>Connect your Gmail account to start. Lightmail syncs the labels you pick.</p>
@@ -129,6 +105,31 @@
     </label>
     <label>Check for new mail every <span class="dir"><input class="mins" type="number" min="1" bind:value={cfg.syncMinutes} /> minutes</span></label>
 
+    <fieldset>
+      <legend>Appearance</legend>
+      <div class="look">
+        <span class="muted">Density</span>
+        <div class="seg" role="radiogroup" aria-label="Density">
+          {#each [['comfortable', 'Comfortable'], ['compact', 'Compact']] as [v, label]}
+            <label><input type="radio" name="density" value={v} checked={look.density === v} onchange={() => onlook({ density: v })} /> {label}</label>
+          {/each}
+        </div>
+        <span class="muted">Layout</span>
+        <div class="seg" role="radiogroup" aria-label="Layout">
+          {#each [['cards', 'Cards'], ['table', 'Table']] as [v, label]}
+            <label><input type="radio" name="layout" value={v} checked={look.layout === v} onchange={() => onlook({ layout: v })} /> {label}</label>
+          {/each}
+        </div>
+        <span class="muted">Zoom</span>
+        <div class="seg" role="radiogroup" aria-label="Zoom">
+          {#each zooms as v}
+            <label><input type="radio" name="scale" value={v} checked={look.scale === v} onchange={() => onlook({ scale: v })} /> {v}%</label>
+          {/each}
+        </div>
+      </div>
+      <span class="hint muted">Compact fits more mail on screen: narrower panes and tighter rows. Cards lists mail beside the open message; Table shows sender, subject and date in columns above it (the buttons beside Sort switch too). Zoom scales the whole app; Ctrl+Shift+Plus / Minus / 0 work anywhere. Changes apply immediately.</span>
+    </fieldset>
+
     <div><button class="primary" type="submit" disabled={!cfg.labels.length}>Save and sync</button></div>
   </form>
 {/if}
@@ -159,8 +160,7 @@
   .dir { display: flex; gap: 8px; align-items: center; font-weight: 400; }
   .dir input:first-child:not(.mins) { flex: 1; }
   .mins { width: 80px; }
-  .error { color: #b3261e; }
-  @media (prefers-color-scheme: dark) { .error { color: #f2b8b5; } }
+  .error { color: var(--warn); }
   button { border: 1px solid var(--rule); }
   .primary { background: var(--ink); color: var(--paper); border-color: var(--ink); padding: 6px 14px; }
   .primary:hover { background: var(--ink); opacity: 0.9; }

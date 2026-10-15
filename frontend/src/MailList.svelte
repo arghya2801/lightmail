@@ -46,7 +46,7 @@
       out:slide={{ duration: out }}>
       <input type="checkbox" class="pick" checked={selected.has(m.id)} aria-label="Select"
         onclick={(e) => { e.stopPropagation(); ontoggle(m) }} />
-      <button class="star" class:on={m.flagged} aria-label={m.flagged ? 'Unstar' : 'Star'} title="s"
+      <button class="star" class:on={m.flagged} aria-label={m.flagged ? 'Unstar' : 'Star'} title="{m.flagged ? 'Unstar' : 'Star'} (s)"
         onclick={(e) => { e.stopPropagation(); onstar(m) }}>{m.flagged ? '★' : '☆'}</button>
       <span class="from">{m.fromName || m.fromAddr || '(unknown sender)'}</span>
       <span class="date">{fmtDate(m.date)}</span>

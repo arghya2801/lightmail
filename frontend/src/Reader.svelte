@@ -85,9 +85,9 @@
       </ul>
     {/if}
     <div class="actions">
-      {#each actions as a (a.label)}<button onclick={a.run} title={a.key}>{a.label}</button>{/each}
+      {#each actions as a (a.label)}<button onclick={a.run} title="{a.label} ({a.key})">{a.label}</button>{/each}
       <span class="right">
-        {#if !msg.error}<button onclick={onsave} title="Shift+S">Save as HTML</button>{/if}
+        {#if !msg.error && !msg.loading}<button onclick={onsave} title="Save as HTML (Shift+S)">Save as HTML</button>{/if}
         {#if zoom !== 100}<button class="muted zoom" onclick={() => onzoom(0)} title="Reset zoom (Ctrl+0)">{zoom}%</button>{/if}
       </span>
     </div>
@@ -103,6 +103,8 @@
   <div class="body" {onwheel}>
     {#if msg.error}
       <p class="error">{msg.error}</p>
+    {:else if msg.loading}
+      <p class="error loading">Downloading the message…</p>
     {:else}
       <iframe bind:this={frame} title={msg.subject} sandbox="allow-same-origin" {srcdoc} onload={loaded}></iframe>
     {/if}
@@ -137,6 +139,9 @@
   .blocked .muted { margin-right: auto; }
   .blocked button { border: 1px solid var(--rule); }
   .error { margin: 0; padding: 16px 40px 24px; border-top: 1px solid var(--rule); color: var(--muted); }
+  /* Only says so when the download is slow; a cached body arrives before this shows. */
+  .loading { opacity: 0; animation: show 0s 400ms forwards; }
+  @keyframes show { to { opacity: 1; } }
   /* Mail is shown on white, so it must see a light theme too: inside the frame,
      prefers-color-scheme follows this color-scheme. Dark-mode rules in mail
      (white links, say) would otherwise land on white. */

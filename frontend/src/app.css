@@ -9,6 +9,7 @@
   --picked: color-mix(in srgb, var(--focus) 10%, var(--paper));
   --drop: color-mix(in srgb, var(--focus) 18%, transparent);
   --star: #c98a0c;
+  --warn: #b3261e;
   /* density: comfortable by default, overridden by [data-density="compact"] */
   --side-w: 232px;
   --list-w: 360px;
@@ -35,6 +36,7 @@
     --mark: rgba(217, 169, 40, 0.5);
     --focus: #8fb4ec;
     --star: #e5b94a;
+    --warn: #f2b8b5;
     color-scheme: dark;
   }
 }

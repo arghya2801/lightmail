@@ -5,7 +5,7 @@
     GetConfig, GetSyncStatus, Folders, Senders, List, Open, AllowImages, SetFlags, SaveEmail, SaveAttachment, Sync, SetAppearance, SetReaderZoom,
     Archive, Trash, Spam, Move, AddLabel, DeleteForever, Undo, CreateLabel, RenameLabel, DeleteLabel,
   } from '../wailsjs/go/main/App'
-  import { EventsOn } from '../wailsjs/runtime/runtime'
+  import { EventsOn, WindowSetTitle } from '../wailsjs/runtime/runtime'
   import Reader from './Reader.svelte'
   import MailList from './MailList.svelte'
   import Picker from './Picker.svelte'
@@ -28,6 +28,8 @@
   let sync = $state({ running: false, count: 0, error: '' })
   let syncedAt = $state(null)
   let toast = $state(null)
+  let question = $state(null) // { text, ok, value, resolve } while ask() waits for an answer
+  let helpEl = $state()
   let searchEl = $state()
   let listEl = $state()
   let mainEl = $state()
@@ -106,6 +108,8 @@
   let chosen = false // picked the Inbox on first load
   async function counts() {
     folders = (await Folders()) ?? []
+    const unread = folders.find((f) => f.role === 'inbox')?.unread
+    WindowSetTitle(unread ? `(${unread}) Lightmail` : 'Lightmail') // shows on the taskbar
     if (!chosen && folders.length) {
       chosen = true
       const inbox = synced.find((f) => f.role === 'inbox')
@@ -133,22 +137,44 @@
     selected.clear()
   }
 
+  // Toasts fade after 6 seconds unless hovered; errors stay until dismissed.
   function flash(text, action, fn) {
     toast = { text, action, fn }
+    later()
+  }
+  function fail(text) {
     clearTimeout(flash.t)
-    flash.t = setTimeout(() => (toast = null), 6000)
+    toast = { text, action: 'Dismiss', fn: () => {}, error: true }
+  }
+  function later() {
+    clearTimeout(flash.t)
+    if (!toast?.error) flash.t = setTimeout(() => (toast = null), 6000)
   }
 
+  // In-app stand-in for confirm() and prompt(): resolves to true, the typed text, or null.
+  function ask(text, ok, value = null) {
+    return new Promise((resolve) => (question = { text, ok, value, resolve }))
+  }
+  function answered(e) {
+    const { value, resolve } = question
+    question = null
+    resolve(e.currentTarget.returnValue === 'ok' ? (value ?? true) : null)
+  }
+  const modal = (d) => d.showModal()
+
+  // Show the headers at once; the body follows when it has downloaded.
   async function open(m) {
+    view = 'reader'
+    msg = { ...$state.snapshot(m), html: '', labels: [], loading: true }
+    let full
     try {
-      msg = await Open(m.id, false)
+      full = await Open(m.id, false)
     } catch (e) {
-      // Still show the headers, so the message can be triaged while offline.
-      msg = { ...$state.snapshot(m), html: '', labels: [], error: "Couldn't download this message. " + e }
-      view = 'reader'
+      // Keep the headers, so the message can be triaged while offline.
+      if (msg?.id === m.id) msg = { ...msg, loading: false, error: "Couldn't download this message. " + e }
       return
     }
-    view = 'reader'
+    if (msg?.id === m.id) msg = full // unless another message was opened meanwhile
     if (!m.read) {
       m.read = true
       counts()
@@ -218,7 +244,7 @@
   async function act(kind, to = '', ids = targets()) {
     if (!ids.length) return
     const n = ids.length
-    if (kind === 'forever' && !confirm(`Delete ${n === 1 ? 'this message' : `${n} messages`} forever? This can't be undone.`)) return
+    if (kind === 'forever' && !(await ask(`Delete ${n === 1 ? 'this message' : `${n} messages`} forever? This can't be undone.`, 'Delete forever'))) return
     const src = from
     if (kind !== 'label') takeOut(ids)
     let moved = null
@@ -231,7 +257,7 @@
       else if (kind === 'label') moved = await AddLabel(ids, to)
       else if (kind === 'forever') await DeleteForever(ids, src)
     } catch (e) {
-      flash(`Couldn't ${failed[kind](to)}. ${e}`)
+      fail(`Couldn't ${failed[kind](to)}. ${e}`)
       load(true, true)
       return counts()
     }
@@ -241,7 +267,7 @@
       try {
         await Undo(moved)
       } catch (e) {
-        flash('Could not undo: ' + e)
+        fail("Couldn't undo. " + e)
       }
       load(true, true)
       counts()
@@ -271,7 +297,7 @@
     try {
       flash('Saved to ' + (await SaveEmail(msg.id)))
     } catch (e) {
-      flash('Could not save: ' + e)
+      fail("Couldn't save. " + e)
     }
   }
 
@@ -280,7 +306,7 @@
       if (always) await AllowImages(msg.fromAddr)
       msg = await Open(msg.id, true)
     } catch (e) {
-      flash("Couldn't load images. " + e)
+      fail("Couldn't load images. " + e)
     }
   }
 
@@ -289,7 +315,7 @@
       const path = await SaveAttachment(msg.id, i)
       if (path) flash('Saved to ' + path)
     } catch (e) {
-      flash("Couldn't save the attachment. " + e)
+      fail("Couldn't save the attachment. " + e)
     }
   }
 
@@ -309,8 +335,8 @@
     }
     a.push(
       ['Move to…', 'v', () => (picker = 'move')],
-      ['Label…', 'l', () => (picker = 'label')],
-      rows.some((m) => !m.read) ? ['Mark read', 'Shift+I', () => setRead(true)] : ['Mark unread', 'Shift+U', () => setRead(false)],
+      ['Label…', 'c', () => (picker = 'label')],
+      rows.some((m) => !m.read) ? ['Mark read', 't', () => setRead(true)] : ['Mark unread', 't', () => setRead(false)],
       rows.some((m) => !m.flagged) ? ['Star', 's', () => setStar(true)] : ['Unstar', 's', () => setStar(false)],
     )
     return a.map(([label, key, run]) => ({ label, key, run }))
@@ -355,28 +381,29 @@
       await fn()
       await counts()
     } catch (e) {
-      flash(`Couldn't ${what}. ${e}`)
+      fail(`Couldn't ${what}. ${e}`)
     }
   }
   function openMenu(e, path, folder) {
     e.preventDefault()
     e.stopPropagation()
-    menu = { x: e.clientX, y: e.clientY, path, folder }
+    const z = look.scale / 100 // app zoom scales left/top too; clientX/Y are already zoomed
+    menu = { x: e.clientX / z, y: e.clientY / z, path, folder }
   }
-  function newLabel(parent = '') {
-    const n = prompt(parent ? `New label inside ${parent}` : 'New label')?.trim()
+  async function newLabel(parent = '') {
+    const n = (await ask(parent ? `New label inside ${parent}` : 'New label', 'Create', ''))?.trim()
     if (n) labelOp('create the label', () => CreateLabel(parent ? `${parent}/${n}` : n))
   }
-  function renameLabel(old) {
-    const n = prompt('Rename label', old)?.trim()
+  async function renameLabel(old) {
+    const n = (await ask('Rename label', 'Rename', old))?.trim()
     if (!n || n === old) return
     labelOp('rename the label', async () => {
       await RenameLabel(old, n)
       if (q.label === old || q.label.startsWith(old + '/')) q.label = n + q.label.slice(old.length)
     })
   }
-  function deleteLabel(name) {
-    if (!confirm(`Delete the label ${name}? Its messages keep their other labels and stay in All Mail.`)) return
+  async function deleteLabel(name) {
+    if (!(await ask(`Delete the label ${name}? Its messages keep their other labels and stay in All Mail.`, 'Delete label'))) return
     labelOp('delete the label', async () => {
       await DeleteLabel(name)
       if (q.label === name) go(roleFolder('inbox'))
@@ -421,7 +448,7 @@
       else return
       return e.preventDefault()
     }
-    if (picker) return
+    if (picker || document.querySelector('dialog[open]')) return
     if (menu && e.key === 'Escape') return (menu = null)
     if (e.target?.closest?.('input, textarea, select')) {
       if (e.key === 'Escape') e.target.blur()
@@ -470,12 +497,30 @@
       r: Sync,
       '/': () => searchEl?.focus(),
       g: () => (gPending = true),
+      '?': () => helpEl.showModal(),
       Escape: () => selected.clear(),
     }
     if (keys[e.key]) {
       e.preventDefault()
       keys[e.key]()
     }
+  }
+
+  // The ? sheet. Keep in step with the README table.
+  const keyHelp = [
+    ['f / j', 'Next message'], ['d / k', 'Previous message'], ['Space / Shift+Space', 'Page through the message, then open the next'],
+    ['e', 'Archive'], ['# / Delete', 'Delete (in Trash or Spam: delete forever)'], ['!', 'Report spam (in Spam: not spam)'],
+    ['z', 'Undo, while its toast is showing'], ['v', 'Move to…'], ['c / l', 'Add label…'], ['s', 'Star or unstar'],
+    ['t', 'Mark read or unread'], ['x', 'Select the open message'], ['Ctrl+A / Esc', 'Select all / clear the selection'],
+    ['Ctrl+F / /', 'Search all mail'], ['g 1 … g 9', 'Open the nth folder in the sidebar'], ['g f / g l', 'Go to any folder or label'],
+    ['g i', 'Inbox'], ['g s', 'Settings'], ['Shift+T', 'Switch between Cards and Table'], ['r', 'Sync now'],
+    ['Shift+S', 'Save the message as HTML'], ['Ctrl+Plus / Minus / 0', 'Zoom the message'], ['Ctrl+Shift+Plus / Minus / 0', 'Zoom the whole app'],
+  ]
+
+  // Open the label menu leftward or upward when it would run off the window.
+  function flip(el) {
+    const r = el.getBoundingClientRect()
+    el.style.transform = `translate(${r.right > innerWidth ? '-100%' : 0}, ${r.bottom > innerHeight ? '-100%' : 0})`
   }
 
   // Density, layout and text size apply straight away, so Settings can preview them live.
@@ -567,15 +612,15 @@
     </div>
 
     <div class="foot">
-      <button class="row" class:on={view === 'settings'} onclick={() => (view = 'settings')} title="g s">Settings</button>
+      <button class="row" class:on={view === 'settings'} onclick={() => (view = 'settings')} title="Settings (g s)">Settings</button>
       <div class="sync">
-        <span class="muted" role="status">
+        <span class="muted" class:warn={sync.error && !sync.running} title={sync.error || null} role="status">
           {#if sync.running}Syncing{sync.label ? ` ${label(sync.label)}` : ''}… {sync.count ? `${sync.count} new` : ''}
           {:else if sync.error}Sync failed: {sync.error}
           {:else if syncedAt}Synced {syncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           {/if}
         </span>
-        <button onclick={Sync} disabled={sync.running} title="r">Sync now</button>
+        <button onclick={Sync} disabled={sync.running} title="Sync now (r)">Sync now</button>
       </div>
     </div>
   </nav>
@@ -621,18 +666,18 @@
       <div class="bulk">
         <h1>{selected.size} selected</h1>
         <div class="actions">
-          {#each actions as a (a.label)}<button onclick={a.run} title={a.key}>{a.label}</button>{/each}
+          {#each actions as a (a.label)}<button onclick={a.run} title="{a.label} ({a.key})">{a.label}</button>{/each}
         </div>
-        <button class="muted" onclick={() => selected.clear()} title="Esc">Clear selection</button>
+        <button class="muted" onclick={() => selected.clear()} title="Clear selection (Esc)">Clear selection</button>
       </div>
     {:else if msg}
-      {#key `${msg.id}:${msg.blocked}`}
+      {#key `${msg.id}:${msg.blocked}:${msg.loading}`}
         <Reader {msg} {onkey} zoom={readerZoom} onzoom={zoomReader}
           {actions} onsave={save} onattach={saveAttachment} onimages={loadImages}
           chips={(msg.labels ?? []).filter((l) => l !== from).map(label)} />
       {/key}
     {:else}
-      <p class="empty muted">Pick a message {look.layout === 'table' ? 'above' : 'on the left'}, or press f.</p>
+      <p class="empty muted">Pick a message {look.layout === 'table' ? 'above' : 'on the left'}, or press f. Press ? for every key.</p>
     {/if}
   </main>
 
@@ -644,14 +689,14 @@
   {/if}
 
   {#if toast}
-    <div class="toast" role="status">
+    <div class="toast" class:error={toast.error} role={toast.error ? 'alert' : 'status'} onmouseenter={() => clearTimeout(flash.t)} onmouseleave={later}>
       <span>{toast.text}</span>
       {#if toast.action}<button onclick={() => { toast.fn(); toast = null }}>{toast.action}</button>{/if}
     </div>
   {/if}
 
   {#if menu}
-    <div class="menu" role="menu" style:left="{menu.x}px" style:top="{menu.y}px">
+    <div class="menu" role="menu" use:flip style:left="{menu.x}px" style:top="{menu.y}px">
       <button role="menuitem" onclick={() => newLabel(menu.path)}>New label inside…</button>
       {#if menu.folder}
         <button role="menuitem" onclick={() => renameLabel(menu.path)}>Rename…</button>
@@ -659,6 +704,29 @@
       {/if}
     </div>
   {/if}
+
+  {#if question}
+    <dialog class="ask" use:modal onclose={answered}>
+      <form method="dialog">
+        <p>{question.text}</p>
+        {#if question.value != null}<input bind:value={question.value} aria-label={question.text} />{/if}
+        <div class="buttons">
+          <button type="button" onclick={(e) => e.currentTarget.closest('dialog').close()}>Cancel</button>
+          <button class="primary" value="ok">{question.ok}</button>
+        </div>
+      </form>
+    </dialog>
+  {/if}
+
+  <dialog class="help" bind:this={helpEl} aria-label="Keyboard shortcuts" onclick={(e) => e.target === e.currentTarget && helpEl.close()}>
+    <div>
+      <h2>Keyboard shortcuts</h2>
+      <table>
+        <tbody>{#each keyHelp as [k, what]}<tr><td><kbd>{k}</kbd></td><td>{what}</td></tr>{/each}</tbody>
+      </table>
+      <p class="muted">In Move, Label and Go to, type to filter, Tab through the folders and Space to pick. Esc closes.</p>
+    </div>
+  </dialog>
 
   <div class="dragchip" bind:this={chipEl} aria-hidden="true"></div>
 </div>
@@ -713,6 +781,7 @@
   .sync { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 10px 0; font-size: 12px; }
   .sync span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sync button { flex: none; font-size: 12px; }
+  .sync .warn { color: var(--warn); }
 
   .list { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--rule); }
   .tools { display: flex; gap: 8px; padding: var(--tools-p); border-bottom: 1px solid var(--rule); }
@@ -741,4 +810,25 @@
   .toast span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .toast button { color: var(--paper); text-decoration: underline; }
   .toast button:hover { background: transparent; }
+  .toast.error { box-shadow: inset 4px 0 #d93025; padding-left: 18px; } /* the toast inverts the theme, so --warn would be wrong */
+
+  dialog {
+    padding: 0; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper); color: var(--ink);
+    box-shadow: 0 12px 32px color-mix(in srgb, var(--ink) 18%, transparent);
+  }
+  dialog::backdrop { background: color-mix(in srgb, var(--ink) 12%, transparent); }
+  .ask { width: min(420px, calc(100vw - 32px)); }
+  .ask form { display: flex; flex-direction: column; gap: 12px; padding: 20px; }
+  .ask p { margin: 0; }
+  .buttons { display: flex; justify-content: flex-end; gap: 8px; }
+  .buttons button { border: 1px solid var(--rule); }
+  .buttons .primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .help { max-height: 85vh; }
+  .help > div { padding: 20px 24px; }
+  .help h2 { font: 500 22px/1.2 var(--serif); margin: 0 0 12px; }
+  .help table { border-collapse: collapse; }
+  .help td { padding: 3px 0; vertical-align: top; }
+  .help td:first-child { padding-right: 24px; white-space: nowrap; }
+  .help p { margin: 12px 0 0; max-width: 46ch; font-size: 13px; }
+  kbd { font: inherit; font-weight: 600; }
 </style>
