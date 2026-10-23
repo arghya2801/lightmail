@@ -615,7 +615,10 @@ func fetchImage(dir, u string) (body []byte, ctype string, err error) {
 			return body, string(ct), nil
 		}
 	}
-	req, _ := http.NewRequest("GET", u, nil)
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil { // mail is full of malformed URLs
+		return nil, "", err
+	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
 	resp, err := httpc.Do(req)
 	if err != nil {

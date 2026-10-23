@@ -93,10 +93,10 @@
     </fieldset>
 
     <label class="check">
-      <input type="checkbox" bind:checked={cfg.allImages} />
-      Load remote images in all mail
+      <input type="checkbox" bind:checked={cfg.blockImages} />
+      Hide remote images until I ask
     </label>
-    <span class="hint muted check-hint">Off: images load only after you click Load images, or for senders you allow. Remote images can tell the sender when you opened a message.</span>
+    <span class="hint muted check-hint">Remote images can tell the sender when you opened a message. When they're hidden, click Load images in a message, or allow a sender for good.</span>
 
     <label>
       Save folder

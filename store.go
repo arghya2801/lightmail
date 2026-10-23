@@ -27,9 +27,9 @@ type Config struct {
 	Layout      string   `json:"layout"`     // "cards" (list beside the message) or "table" (columns above it)
 	Scale       int      `json:"scale"`      // interface size in percent
 	ReaderZoom  int      `json:"readerZoom"` // message body zoom in percent
-	// Remote images are tracking beacons as often as pictures, so they load
-	// only for senders on this list, unless AllImages is set.
-	AllImages    bool     `json:"allImages"`
+	// Remote images are tracking beacons as often as pictures. With BlockImages
+	// set they load only for senders on this list, or when asked.
+	BlockImages  bool     `json:"blockImages"`
 	ImageSenders []string `json:"imageSenders"`
 }
 

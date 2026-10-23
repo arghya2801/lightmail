@@ -396,8 +396,8 @@ func (a *App) raw(id int64) ([]byte, error) {
 }
 
 // Open returns a message ready to render and marks it read, here and on the
-// server. Remote images load only when images is true, the sender is on the
-// allow list, or Settings says always; otherwise m.Blocked counts them.
+// server. Remote images load unless Settings blocks them; then only when images
+// is true or the sender is on the allow list, and m.Blocked counts the rest.
 func (a *App) Open(id int64, images bool) (Msg, error) {
 	m, err := a.store.Get(id)
 	if err != nil {
@@ -413,7 +413,7 @@ func (a *App) Open(id int64, images bool) (Msg, error) {
 	}
 	c := a.config()
 	src := proxied
-	if !images && !c.AllImages && !slices.Contains(c.ImageSenders, m.FromAddr) {
+	if !images && c.BlockImages && !slices.Contains(c.ImageSenders, m.FromAddr) {
 		src = func(string) string { m.Blocked++; return "" }
 	}
 	m.HTML = rewrite(p.HTML, src)

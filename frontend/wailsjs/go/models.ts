@@ -29,7 +29,7 @@ export namespace main {
 	    layout: string;
 	    scale: number;
 	    readerZoom: number;
-	    allImages: boolean;
+	    blockImages: boolean;
 	    imageSenders: string[];
 	
 	    static createFrom(source: any = {}) {
@@ -48,7 +48,7 @@ export namespace main {
 	        this.layout = source["layout"];
 	        this.scale = source["scale"];
 	        this.readerZoom = source["readerZoom"];
-	        this.allImages = source["allImages"];
+	        this.blockImages = source["blockImages"];
 	        this.imageSenders = source["imageSenders"];
 	    }
 	}

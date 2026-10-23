@@ -115,6 +115,9 @@ func TestFetchImageCaches(t *testing.T) {
 	if _, _, err := fetchImage(dir, "file:///c:/windows/win.ini"); err == nil {
 		t.Error("non-http url accepted")
 	}
+	if _, _, err := fetchImage(dir, "https://cdn.x/a%zz.png"); err == nil { // used to panic
+		t.Error("malformed url accepted")
+	}
 }
 
 // fakeIMAP is go-imap's in-memory server with INBOX, News, Fin, All Mail and
@@ -320,7 +323,11 @@ func TestOpen(t *testing.T) {
 	if !strings.Contains(m.HTML, "prices rose") || !m.Read || fmt.Sprint(m.Labels) != "[INBOX]" {
 		t.Fatalf("open: read=%v labels=%v html=%q", m.Read, m.Labels, m.HTML)
 	}
-	if strings.Contains(m.HTML, "/img?u=") || m.Blocked != 1 {
+	if !strings.Contains(m.HTML, "/img?u=") || m.Blocked != 0 {
+		t.Errorf("remote image not loaded by default: blocked=%d", m.Blocked)
+	}
+	a.cfg.BlockImages = true
+	if m, _ := a.Open(1, false); strings.Contains(m.HTML, "/img?u=") || m.Blocked != 1 {
 		t.Errorf("remote image not held back: blocked=%d html=%q", m.Blocked, m.HTML)
 	}
 	if m, _ := a.Open(1, true); !strings.Contains(m.HTML, "/img?u=") || m.Blocked != 0 {
