@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
@@ -417,5 +418,55 @@ func TestAttachments(t *testing.T) {
 	}
 	if out := rewrite(m.HTML, proxied); !strings.Contains(out, "data:image/png") {
 		t.Errorf("rewrite dropped the inlined image: %s", out)
+	}
+}
+
+// TestMatchSkipsNewer: a message changed here after reconcile asked the server
+// (a move, an undo, a pushed read) keeps the local state; the rest follow the server.
+func TestMatchSkipsNewer(t *testing.T) {
+	s := testStore(t)
+	tx, _ := s.db.Begin()
+	insertHeader(tx, &Msg{MessageID: "old@x"}, "INBOX", 1)
+	insertHeader(tx, &Msg{MessageID: "new@x"}, "INBOX", 2)
+	tx.Commit()
+	since := s.mark()
+	id := idOf(t, s, "new@x")
+	s.touch(id) // say, undone back into the Inbox and read, after the SEARCH
+	s.db.Exec(`UPDATE messages SET read=1 WHERE id=?`, id)
+
+	if err := s.match("INBOX", map[uint32]bool{}, map[uint32]bool{2: true}, map[uint32]bool{}, since); err != nil {
+		t.Fatal(err)
+	}
+	l, _ := s.List(Query{Label: "INBOX"})
+	if len(l) != 1 || l[0].ID != id || !l[0].Read {
+		t.Errorf("after match: %+v", l)
+	}
+}
+
+func TestCanOpen(t *testing.T) {
+	for name, want := range map[string]bool{
+		"report.PDF": true, "photo.jpg": true, "setup.exe": false, "invoice.pdf.exe": false,
+		"run.exe.": false, "x.exe:y.pdf": true, "page.html": false, "a.lnk": false, "noext": false,
+	} {
+		if got := canOpen(name); got != want {
+			t.Errorf("canOpen(%q) = %v", name, got)
+		}
+	}
+}
+
+func TestSweepImages(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "img"), 0o755)
+	old, fresh := filepath.Join(dir, "img", "old"), filepath.Join(dir, "img", "fresh")
+	os.WriteFile(old, nil, 0o644)
+	os.WriteFile(fresh, nil, 0o644)
+	long := time.Now().Add(-2 * imageTTL)
+	os.Chtimes(old, long, long)
+	sweepImages(dir, imageTTL)
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Error("stale image kept")
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Error("fresh image swept")
 	}
 }

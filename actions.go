@@ -96,6 +96,7 @@ func expunge(ss *session, folder string, uids []imap.UID) error {
 // relabel applies one finished server change to the cache: id left from (if
 // any) and, when to is synced and its UID known, arrived there.
 func (s *Store) relabel(id int64, from, to string, uid uint32, synced bool) error {
+	s.touch(id)
 	if from != "" {
 		if _, err := s.db.Exec(`DELETE FROM message_labels WHERE message_id=? AND label=?`, id, from); err != nil {
 			return err

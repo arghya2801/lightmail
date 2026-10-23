@@ -80,7 +80,10 @@
     {#if msg.attachments?.length}
       <ul class="files" aria-label="Attachments">
         {#each msg.attachments as f, i}
-          <li><button onclick={() => onattach(i)} title="Save {f.name}">{f.name} <span class="muted">{kb(f.size)}</span></button></li>
+          <li>
+            <button onclick={() => onattach(i, f.open)} title="{f.open ? 'Open' : 'Save'} {f.name}">{f.name} <span class="muted">{kb(f.size)}</span></button>
+            {#if f.open}<button class="save" onclick={() => onattach(i, false)} title="Save {f.name}">Save</button>{/if}
+          </li>
         {/each}
       </ul>
     {/if}
@@ -125,7 +128,9 @@
   .who { color: var(--ink); }
   .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 12px; }
   .files { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; padding: 0; }
+  .files li { display: flex; }
   .files button { border: 1px solid var(--rule); padding: 3px 10px; }
+  .files .save { border-left: 0; color: var(--muted); }
   .files .muted { font-size: 12px; margin-left: 4px; }
   .chip { font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--chrome); color: var(--muted); }
   .actions { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-left: -8px; }

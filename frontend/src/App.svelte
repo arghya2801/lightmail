@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { SvelteSet } from 'svelte/reactivity'
   import {
-    GetConfig, GetSyncStatus, Folders, Senders, List, Open, AllowImages, SetFlags, SaveEmail, SaveAttachment, Sync, SetAppearance, SetReaderZoom,
+    GetConfig, GetSyncStatus, Folders, Senders, List, Open, AllowImages, SetFlags, SaveEmail, SaveAttachment, OpenAttachment, Sync, SetAppearance, SetReaderZoom,
     Archive, Trash, Spam, Move, AddLabel, DeleteForever, Undo, CreateLabel, RenameLabel, DeleteLabel,
   } from '../wailsjs/go/main/App'
   import { EventsOn, WindowSetTitle } from '../wailsjs/runtime/runtime'
@@ -310,12 +310,13 @@
     }
   }
 
-  async function saveAttachment(i) {
+  async function attachment(i, open) {
     try {
+      if (open) return await OpenAttachment(msg.id, i)
       const path = await SaveAttachment(msg.id, i)
       if (path) flash('Saved to ' + path)
     } catch (e) {
-      fail("Couldn't save the attachment. " + e)
+      fail(`Couldn't ${open ? 'open' : 'save'} the attachment. ` + e)
     }
   }
 
@@ -673,7 +674,7 @@
     {:else if msg}
       {#key `${msg.id}:${msg.blocked}:${msg.loading}`}
         <Reader {msg} {onkey} zoom={readerZoom} onzoom={zoomReader}
-          {actions} onsave={save} onattach={saveAttachment} onimages={loadImages}
+          {actions} onsave={save} onattach={attachment} onimages={loadImages}
           chips={(msg.labels ?? []).filter((l) => l !== from).map(label)} />
       {/key}
     {:else}

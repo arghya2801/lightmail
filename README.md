@@ -59,7 +59,7 @@ In the Move, Label and Go to boxes, type to filter, or press `Tab` / `Shift+Tab`
 
 What the actions do in Gmail: archive removes the Inbox label, and the message stays in All Mail. Delete moves it to Trash, which Gmail empties after 30 days. Moving between labels swaps one label for the other. Filing a message from All Mail adds the label instead, because in Gmail a move out of All Mail deletes.
 
-Remote images stay hidden until you click **Load images** or **Always for this sender**, because images double as read receipts. Settings can turn this off. Attachments appear under the message header; click one to save it. Inline images in the message itself always show. Scripts in mail never run.
+Remote images stay hidden until you click **Load images** or **Always for this sender**, because images double as read receipts. Settings can turn this off. Attachments appear under the message header. Documents, images and media open in their usual app when clicked, marked as downloaded so Office opens them in Protected View; **Save** beside them saves a copy. Anything that could run code (programs, scripts, shortcuts, HTML, archives) can only be saved. Inline images in the message itself always show. Scripts in mail never run.
 
 Settings → Appearance switches between Comfortable (two-line rows) and Compact (one line per message), and sets the app zoom from 80% to 150%. Layout picks Cards (the list beside the message) or Table (sender, subject and date in columns above the message; click Sender or Date to sort). The two buttons next to Sort switch layouts too, and the choice is remembered.
 
@@ -67,7 +67,7 @@ Drag any pane edge to resize it: the sidebar, the message list (its width, or it
 
 ## Where things live
 
-Installed: `%APPDATA%\lightmail\`. Portable: `data\` next to the exe. Either holds `config.json` (includes the app password in plain text), `cache.db` (SQLite: headers, opened bodies, pending read/star changes) and `img\` (image cache). The cache holds nothing Gmail doesn't. Delete `cache.db` to resync from scratch. Set `LIGHTMAIL_DATA` to a folder to run with a separate profile.
+Installed: `%APPDATA%\lightmail\`. Portable: `data\` next to the exe. Either holds `config.json` (includes the app password in plain text), `cache.db` (SQLite: headers, opened bodies, pending read/star changes) and `img\` (image cache; an image not shown for 30 days is deleted at the next start). The cache holds nothing Gmail doesn't. Delete `cache.db` to resync from scratch. Set `LIGHTMAIL_DATA` to a folder to run with a separate profile.
 
 ## Development
 
@@ -81,5 +81,3 @@ go test ./...        # parsing, sync, reconcile, every action, IDLE, against an 
 ```
 
 To release, set `productVersion` in `wails.json`, commit, then push a matching tag (`git tag v1.0.0 && git push origin v1.0.0`). GitHub Actions runs the tests, builds the MSI and the portable zip, and attaches them to a draft release for you to review and publish.
-
-Known limits, marked `ponytail:` in the code: one SQLite connection serialises all queries; an action made while a sync is running can look undone until the next sync; attachments save but don't open in place; the image cache never evicts.

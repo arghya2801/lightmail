@@ -28,6 +28,8 @@ export function Move(arg1:Array<number>,arg2:string,arg3:string):Promise<Array<m
 
 export function Open(arg1:number,arg2:boolean):Promise<main.Msg>;
 
+export function OpenAttachment(arg1:number,arg2:number):Promise<void>;
+
 export function RenameLabel(arg1:string,arg2:string):Promise<void>;
 
 export function SaveAttachment(arg1:number,arg2:number):Promise<string>;

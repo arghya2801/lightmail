@@ -124,11 +124,33 @@ func (s *Store) syncLabel(ss *session, label string, progress func(int)) error {
 		}
 		last = 0
 	}
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
+	type hdr struct {
+		m   *Msg
+		uid uint32
 	}
-	defer func() { tx.Rollback() }()
+	var got []hdr
+	// save writes the headers received so far in one short transaction, so the
+	// cache is never locked while waiting on the network.
+	save := func() error {
+		tx, err := s.db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		for _, h := range got {
+			if err := insertHeader(tx, h.m, label, h.uid); err != nil {
+				return err
+			}
+		}
+		if err := setLabelState(tx, label, sel.UIDValidity, last); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		got = got[:0]
+		return nil
+	}
 	if sel.NumMessages > 0 && (sel.UIDNext == 0 || uint32(sel.UIDNext) > last+1) {
 		cmd := ss.cl.Fetch(imap.UIDSet{{Start: imap.UID(last + 1), Stop: 0}}, &imap.FetchOptions{
 			UID: true, Flags: true, Envelope: true, RFC822Size: true, InternalDate: true,
@@ -144,20 +166,12 @@ func (s *Store) syncLabel(ss *session, label string, progress func(int)) error {
 				continue
 			}
 			last = uint32(buf.UID)
-			if err := insertHeader(tx, envMsg(buf), label, last); err != nil {
-				return err
-			}
+			got = append(got, hdr{envMsg(buf), last})
 			if n++; n%batch == 0 {
-				if err := setLabelState(tx, label, sel.UIDValidity, last); err != nil {
-					return err
-				}
-				if err := tx.Commit(); err != nil {
+				if err := save(); err != nil {
 					return err
 				}
 				progress(n)
-				if tx, err = s.db.Begin(); err != nil {
-					return err
-				}
 			}
 		}
 		if err := cmd.Close(); err != nil {
@@ -165,10 +179,7 @@ func (s *Store) syncLabel(ss *session, label string, progress func(int)) error {
 		}
 		progress(n)
 	}
-	if err := setLabelState(tx, label, sel.UIDValidity, last); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
+	if err := save(); err != nil {
 		return err
 	}
 	return s.reconcile(ss.cl, label)
@@ -213,8 +224,8 @@ func synthID(m *Msg) string {
 // is gone (archived, deleted, moved elsewhere) are dropped, and read/starred
 // follow the server unless a local change is still waiting to be pushed.
 // Three SEARCHes return bare UID lists, cheap even for 50k messages.
-// ponytail: an action that lands mid-sync can be undone locally until the next sync.
 func (s *Store) reconcile(cl *imapclient.Client, label string) error {
+	since := s.mark() // before asking, so anything done here meanwhile is newer than the answer
 	search := func(c *imap.SearchCriteria) (map[uint32]bool, error) {
 		d, err := cl.UIDSearch(c, nil).Wait()
 		if err != nil {
@@ -238,7 +249,13 @@ func (s *Store) reconcile(cl *imapclient.Client, label string) error {
 	if err != nil {
 		return err
 	}
+	return s.match(label, all, unseen, flagged, since)
+}
 
+// match applies what the server said about label's UIDs to the cache. A
+// message changed here after since (moved, undone, read, starred, pushed) is
+// left alone: the server answered before that change, and the next sync sees it.
+func (s *Store) match(label string, all, unseen, flagged map[uint32]bool, since uint64) error {
 	type row struct {
 		uid                    uint32
 		id                     int64
@@ -265,7 +282,12 @@ func (s *Store) reconcile(cl *imapclient.Client, label string) error {
 		return err
 	}
 	defer tx.Rollback()
+	// Checked inside the transaction: a change touches before it writes, and
+	// can't write until this commits, so none slips between check and update.
 	for _, r := range local {
+		if s.changedSince(r.id, since) {
+			continue
+		}
 		switch {
 		case !all[r.uid]:
 			_, err = tx.Exec(`DELETE FROM message_labels WHERE label=? AND uid=?`, label, r.uid)
@@ -363,6 +385,7 @@ func (s *Store) pushFlags(ss *session) error {
 		if err := ss.cl.Store(imap.UIDSetNum(imap.UID(it.uid)), store, nil).Close(); err != nil {
 			return err
 		}
+		s.touch(it.id) // the server changed after any reconcile already asking it
 		// Only if unchanged: a toggle made during the push stays queued.
 		if _, err := s.db.Exec(`DELETE FROM pending_flags WHERE message_id=? AND flag=? AND value=?`, it.id, it.flag, it.value); err != nil {
 			return err
@@ -375,6 +398,7 @@ type Attachment struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
 	Size int    `json:"size"`
+	Open bool   `json:"open"` // safe to hand to its default app; see canOpen
 	data []byte
 }
 
@@ -444,7 +468,7 @@ func parseMsg(raw []byte) (*Msg, error) {
 		if name == "" {
 			name = "attachment"
 		}
-		m.Attachments = append(m.Attachments, Attachment{Name: name, Type: ct, Size: len(b), data: b})
+		m.Attachments = append(m.Attachments, Attachment{Name: name, Type: ct, Size: len(b), Open: canOpen(name), data: b})
 	}
 	if htmlBody == "" {
 		htmlBody = `<pre style="white-space:pre-wrap;font:inherit">` + html.EscapeString(plain) + `</pre>`
@@ -573,8 +597,11 @@ func proxied(u string) string { return "/img?u=" + url.QueryEscape(u) }
 
 var httpc = &http.Client{Timeout: 20 * time.Second}
 
-// fetchImage returns an image from the disk cache, downloading it once.
-// ponytail: cache never evicts; add an LRU sweep if img/ gets big.
+// imageTTL is how long a cached image survives without being shown.
+const imageTTL = 30 * 24 * time.Hour
+
+// fetchImage returns an image from the disk cache, downloading it once. A hit
+// renews the file's time, which is what sweepImages goes by.
 func fetchImage(dir, u string) (body []byte, ctype string, err error) {
 	if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
 		return nil, "", errors.New("bad image url")
@@ -583,6 +610,8 @@ func fetchImage(dir, u string) (body []byte, ctype string, err error) {
 	path := filepath.Join(dir, "img", hex.EncodeToString(sum[:]))
 	if b, err := os.ReadFile(path); err == nil {
 		if ct, body, ok := bytes.Cut(b, []byte{'\n'}); ok {
+			now := time.Now()
+			os.Chtimes(path, now, now)
 			return body, string(ct), nil
 		}
 	}
@@ -606,4 +635,15 @@ func fetchImage(dir, u string) (body []byte, ctype string, err error) {
 	}
 	os.WriteFile(path, append([]byte(ctype+"\n"), body...), 0o644)
 	return body, ctype, nil
+}
+
+// sweepImages deletes cached images not shown for longer than ttl. One the
+// WebView still holds is simply downloaded again if it's ever asked for.
+func sweepImages(dir string, ttl time.Duration) {
+	ents, _ := os.ReadDir(filepath.Join(dir, "img"))
+	for _, e := range ents {
+		if info, err := e.Info(); err == nil && time.Since(info.ModTime()) > ttl {
+			os.Remove(filepath.Join(dir, "img", e.Name()))
+		}
+	}
 }

@@ -87,7 +87,6 @@ func saveConfig(dir string, c Config) error {
 // fts is contentless: it indexes the text without storing a second copy.
 const schema = `
 PRAGMA journal_mode=WAL;
-PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS messages(
   id INTEGER PRIMARY KEY, message_id TEXT UNIQUE NOT NULL,
   from_name TEXT NOT NULL, from_addr TEXT NOT NULL, to_addrs TEXT NOT NULL, subject TEXT NOT NULL,
@@ -106,18 +105,50 @@ CREATE TABLE IF NOT EXISTS pending_flags(
   PRIMARY KEY(message_id, flag));
 `
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db *sql.DB
+
+	mu      sync.Mutex
+	seq     uint64           // counts local changes
+	touched map[int64]uint64 // message id -> seq of its latest local change
+}
+
+// touch records a local change to message id, before it is written, so a
+// reconcile that read the server earlier knows its answer is stale for id.
+func (s *Store) touch(id int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.seq++
+	s.touched[id] = s.seq
+}
+
+// mark returns a point to compare later changes against. Older entries can't
+// matter to this mark or any later one, so they are dropped.
+func (s *Store) mark() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	clear(s.touched)
+	return s.seq
+}
+
+func (s *Store) changedSince(id int64, mark uint64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.touched[id] > mark
+}
 
 // schemaVersion goes up whenever schema changes shape. The cache holds
 // nothing the server doesn't, so an old one is deleted and synced again.
 const schemaVersion = 2
 
 func openStore(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	// WAL lets the list read while a sync writes. Pragmas are per connection, so
+	// they go in the DSN; immediate transactions take the write lock up front
+	// and wait for it, rather than failing when two writers meet.
+	db, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(10000)&_txlock=immediate")
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1) // ponytail: single conn serialises everything; fine for one user
 	var v, tables int
 	db.QueryRow(`PRAGMA user_version`).Scan(&v)
 	db.QueryRow(`SELECT count(*) FROM sqlite_master`).Scan(&tables)
@@ -133,7 +164,7 @@ func openStore(path string) (*Store, error) {
 	if _, err := db.Exec(schema + fmt.Sprintf("PRAGMA user_version=%d;", schemaVersion)); err != nil {
 		return nil, err
 	}
-	return &Store{db}, nil
+	return &Store{db: db, touched: map[int64]uint64{}}, nil
 }
 
 var packers = sync.Pool{New: func() any { w, _ := flate.NewWriter(nil, flate.DefaultCompression); return w }}
@@ -460,6 +491,7 @@ func (s *Store) setFlag(id int64, flag string, value bool) error {
 	if !ok {
 		return fmt.Errorf("unknown flag %s", flag)
 	}
+	s.touch(id)
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err

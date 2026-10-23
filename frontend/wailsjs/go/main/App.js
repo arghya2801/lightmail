@@ -54,6 +54,10 @@ export function Open(arg1, arg2) {
   return window['go']['main']['App']['Open'](arg1, arg2);
 }
 
+export function OpenAttachment(arg1, arg2) {
+  return window['go']['main']['App']['OpenAttachment'](arg1, arg2);
+}
+
 export function RenameLabel(arg1, arg2) {
   return window['go']['main']['App']['RenameLabel'](arg1, arg2);
 }

@@ -3,16 +3,19 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"golang.org/x/sys/windows"
 )
 
 // App is the whole frontend API; every exported method is bound to JS.
@@ -47,6 +50,10 @@ func NewApp(dir string, portable bool, store *Store) *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	go func() {
+		sweepImages(a.dir, imageTTL)
+		os.RemoveAll(openDir()) // files still open in a viewer stay until next time
+	}()
 	go a.watchInbox()
 	go func() {
 		for {
@@ -432,22 +439,28 @@ func (a *App) AllowImages(sender string) error {
 	return saveConfig(a.dir, c)
 }
 
-// SaveAttachment asks where to save attachment i of message id and writes it
-// there. It returns the path, or "" if the user cancelled.
-// ponytail: save only; opening attachments in place would mean running unknown files.
-func (a *App) SaveAttachment(id int64, i int) (string, error) {
+func (a *App) attachment(id int64, i int) (Attachment, error) {
 	raw, err := a.raw(id)
 	if err != nil {
-		return "", err
+		return Attachment{}, err
 	}
 	p, err := parseMsg(raw)
 	if err != nil {
-		return "", err
+		return Attachment{}, err
 	}
 	if i < 0 || i >= len(p.Attachments) {
-		return "", errors.New("no such attachment")
+		return Attachment{}, errors.New("no such attachment")
 	}
-	at := p.Attachments[i]
+	return p.Attachments[i], nil
+}
+
+// SaveAttachment asks where to save attachment i of message id and writes it
+// there. It returns the path, or "" if the user cancelled.
+func (a *App) SaveAttachment(id int64, i int) (string, error) {
+	at, err := a.attachment(id, i)
+	if err != nil {
+		return "", err
+	}
 	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title: "Save attachment", DefaultDirectory: a.saveDir(), DefaultFilename: safeName(at.Name),
 	})
@@ -455,6 +468,54 @@ func (a *App) SaveAttachment(id int64, i int) (string, error) {
 		return "", err
 	}
 	return path, os.WriteFile(path, at.data, 0o644)
+}
+
+// viewable lists the attachment types that may open in their default app:
+// documents, images and media. Programs, scripts, shortcuts, HTML and
+// archives can carry code that runs on open, so those can only be saved.
+var viewable = map[string]bool{
+	".pdf": true, ".txt": true, ".csv": true, ".ics": true,
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true, ".bmp": true, ".heic": true,
+	".docx": true, ".xlsx": true, ".pptx": true, ".odt": true, ".ods": true, ".odp": true,
+	".mp3": true, ".m4a": true, ".wav": true, ".mp4": true, ".mov": true,
+}
+
+// canOpen goes by the name the file would be written under, so tricks like a
+// trailing dot or a stream name can't turn a program into a "document".
+func canOpen(name string) bool { return viewable[strings.ToLower(filepath.Ext(safeName(name)))] }
+
+// openDir holds attachments opened in place; emptied at startup, since the
+// apps viewing them keep the files locked while open.
+func openDir() string { return filepath.Join(os.TempDir(), "lightmail-open") }
+
+// OpenAttachment writes attachment i to a temporary folder and opens it in its
+// default app. The file is marked as downloaded from the internet (Mark of the
+// Web), so Office opens it in Protected View and SmartScreen still applies.
+func (a *App) OpenAttachment(id int64, i int) error {
+	at, err := a.attachment(id, i)
+	if err != nil {
+		return err
+	}
+	if !at.Open {
+		return fmt.Errorf("%s could run code when opened, so save it instead", at.Name)
+	}
+	os.MkdirAll(openDir(), 0o700)
+	dir, err := os.MkdirTemp(openDir(), "")
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(dir, safeName(at.Name))
+	if err := os.WriteFile(path, at.data, 0o600); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path+":Zone.Identifier", []byte("[ZoneTransfer]\r\nZoneId=3\r\n"), 0o600); err != nil {
+		return fmt.Errorf("couldn't mark the file as downloaded, so it wasn't opened: %w", err)
+	}
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	return windows.ShellExecute(0, nil, p, nil, nil, windows.SW_SHOWNORMAL)
 }
 
 func (a *App) SaveEmail(id int64) (string, error) {

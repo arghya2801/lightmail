@@ -4,6 +4,7 @@ export namespace main {
 	    name: string;
 	    type: string;
 	    size: number;
+	    open: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Attachment(source);
@@ -14,6 +15,7 @@ export namespace main {
 	        this.name = source["name"];
 	        this.type = source["type"];
 	        this.size = source["size"];
+	        this.open = source["open"];
 	    }
 	}
 	export class Config {
