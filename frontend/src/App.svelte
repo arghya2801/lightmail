@@ -95,11 +95,23 @@
   })
 
   let visibleSenders = $derived(
-    senderFilter ? senders.filter((s) => (s.name + s.key).toLowerCase().includes(senderFilter.toLowerCase())) : senders,
+    // Empty filter: only the sender being viewed, so it can still be cleared.
+    senderFilter ? senders.filter((s) => (s.name + s.key).toLowerCase().includes(senderFilter.toLowerCase())) : senders.filter((s) => s.key === q.sender),
   )
 
+  // Rows taken out by an action stay out of reloads that may have read the cache
+  // before the action finished: id -> null while it runs, then the number of the
+  // last load started by then. A load started later reads the result itself.
+  const hidden = new Map()
+  let loads = 0
+  let shown = 0
   async function load(reset, keepScroll) {
-    const page = (await List({ ...q, label: from, offset: reset ? 0 : items.length })) ?? []
+    const n = ++loads
+    let page = (await List({ ...q, label: from, offset: reset ? 0 : items.length })) ?? []
+    if (n < shown) return // a newer load already landed
+    shown = n
+    page = page.filter((m) => !hidden.has(m.id) || (hidden.get(m.id) !== null && n > hidden.get(m.id)))
+    for (const [id, last] of hidden) if (last !== null && n > last) hidden.delete(id)
     items = reset ? page : [...items, ...page]
     more = page.length === 100
     if (reset && !keepScroll && listEl) listEl.scrollTop = 0
@@ -246,7 +258,11 @@
     const n = ids.length
     if (kind === 'forever' && !(await ask(`Delete ${n === 1 ? 'this message' : `${n} messages`} forever? This can't be undone.`, 'Delete forever'))) return
     const src = from
-    if (kind !== 'label') takeOut(ids)
+    if (kind !== 'label') {
+      for (const id of ids) hidden.set(id, null)
+      takeOut(ids)
+    }
+    const finished = () => kind !== 'label' && ids.forEach((id) => hidden.set(id, loads))
     let moved = null
     try {
       if (kind === 'archive') moved = await Archive(ids, src)
@@ -257,10 +273,12 @@
       else if (kind === 'label') moved = await AddLabel(ids, to)
       else if (kind === 'forever') await DeleteForever(ids, src)
     } catch (e) {
+      finished()
       fail(`Couldn't ${failed[kind](to)}. ${e}`)
       load(true, true)
       return counts()
     }
+    finished()
     counts()
     const undo = moved?.length && moved.every((m) => m.uid)
     flash(`${done[kind](to)}${n > 1 ? `: ${n} messages` : ''}.`, undo && 'Undo', async () => {
