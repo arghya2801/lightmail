@@ -119,7 +119,8 @@
     max-width: 820px; margin: var(--sheet-m) auto 64px; width: calc(100% - 2 * var(--sheet-m)); background: var(--paper);
     border: 1px solid var(--rule); border-radius: 3px;
   }
-  header { padding: var(--head-p); }
+  /* Pinned while the message scrolls under it. */
+  header { padding: var(--head-p); position: sticky; top: 0; z-index: 1; background: var(--paper); border-radius: 3px 3px 0 0; }
   h1 {
     font: 500 var(--h1-size)/1.15 var(--serif); font-optical-sizing: auto; letter-spacing: -0.01em;
     margin: 0 0 10px; text-wrap: balance;
