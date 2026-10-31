@@ -3,7 +3,9 @@
   import { resize } from './resize.js'
 
   // selected is a SvelteSet of ids owned by App; current is the open message's id.
-  // table adds column headings, which sort by sender or date.
+  // sort is "col:dir,..." in priority order. The headings set it: click sorts by that
+  // column alone (again flips it), Shift+click adds it as the next level, then flips, then drops it.
+  // table lines the headings up as columns over the rows.
   let { items, selected, current, onpick, ontoggle, onstar, ondragstart, onmore, el = $bindable(), empty, table, sort, onsort } = $props()
 
   const year = new Date().getFullYear()
@@ -16,27 +18,47 @@
   // Rows leaving after archive/delete/move fold away; instant when motion is reduced.
   const out = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 150
 
+  const firstDir = { date: 'desc', unread: 'desc', star: 'desc', sender: 'asc', subject: 'asc' }
+  let keys = $derived(sort.split(',').map((t) => t.split(':')))
+  function sortBy(col, e) {
+    const i = keys.findIndex(([c]) => c === col)
+    const flip = (d) => (d === 'asc' ? 'desc' : 'asc')
+    let next
+    if (!e.shiftKey) next = [[col, i === 0 && keys.length === 1 ? flip(keys[0][1]) : firstDir[col]]]
+    else if (i < 0) next = [...keys, [col, firstDir[col]]]
+    else if (keys[i][1] === firstDir[col]) next = keys.map((k, j) => (j === i ? [col, flip(k[1])] : k))
+    else next = keys.filter((_, j) => j !== i)
+    onsort(next.length ? next.map((k) => k.join(':')).join(',') : 'date:desc')
+  }
+  const cols = { unread: 'Unread', star: 'Starred', sender: 'Sender', subject: 'Subject', date: 'Date' }
+
   function onscroll(e) {
     const t = e.currentTarget
     if (t.scrollTop + t.clientHeight > t.scrollHeight - 400) onmore()
   }
 </script>
 
-{#if table}
-  <div class="head">
-    <div class="from">
-      <button class:on={sort === 'sender'} onclick={() => onsort('sender')}>Sender</button>
-      <div class="split x" use:resize={{ name: '--col-from', min: 80, max: 600, label: 'Resize the Sender column' }}></div>
-    </div>
-    <span class="subj">Subject</span>
-    <div class="date">
-      <div class="split x" use:resize={{ name: '--col-date', min: 56, max: 240, invert: true, label: 'Resize the Date column' }}></div>
-      <button class:on={sort === 'new' || sort === 'old'} onclick={() => onsort(sort === 'new' ? 'old' : 'new')}>
-        Date{sort === 'new' ? ' ↓' : sort === 'old' ? ' ↑' : ''}
-      </button>
-    </div>
+{#snippet heading(col, text)}
+  {@const i = keys.findIndex(([c]) => c === col)}
+  <button class:on={i >= 0} onclick={(e) => sortBy(col, e)}
+    title="Sort by {cols[col]}; Shift+click adds it as another level" aria-label="Sort by {cols[col]}">
+    {text}{#if i >= 0}{keys[i][1] === 'desc' ? ' ↓' : ' ↑'}{#if keys.length > 1}<sup>{i + 1}</sup>{/if}{/if}
+  </button>
+{/snippet}
+
+<div class="head" class:table>
+  <div class="pick">{@render heading('unread', '●')}</div>
+  <div class="star">{@render heading('star', '★')}</div>
+  <div class="from">
+    {@render heading('sender', 'Sender')}
+    {#if table}<div class="split x" use:resize={{ name: '--col-from', min: 80, max: 600, label: 'Resize the Sender column' }}></div>{/if}
   </div>
-{/if}
+  <div class="subj">{@render heading('subject', 'Subject')}</div>
+  <div class="date">
+    {#if table}<div class="split x" use:resize={{ name: '--col-date', min: 56, max: 240, invert: true, label: 'Resize the Date column' }}></div>{/if}
+    {@render heading('date', 'Date')}
+  </div>
+</div>
 
 <div class="items" class:table class:selecting={selected.size > 0} bind:this={el} {onscroll} role="listbox" aria-multiselectable="true" aria-label="Messages">
   {#each items as m (m.id)}
@@ -72,7 +94,7 @@
     grid-template-areas: 'pick star from subj date';
   }
   /* Table: fixed columns, so rows line up under the headings. */
-  .head, .items.table .item {
+  .head.table, .items.table .item {
     grid-template-columns: 16px 18px var(--col-from, minmax(0, 1.2fr)) minmax(0, 3fr) var(--col-date, 7.5em);
     grid-template-areas: 'pick star from subj date';
   }
@@ -81,13 +103,17 @@
   .items.table { overflow-y: auto; }
   .items.table .item { padding-top: calc(var(--row-py) * 0.6); padding-bottom: calc(var(--row-py) * 0.6); }
   .head {
-    display: grid; column-gap: 6px; align-items: center;
+    display: flex; column-gap: 10px; align-items: center;
     padding: 2px var(--row-px) 2px 6px; border-left: 3px solid transparent; border-bottom: 1px solid var(--rule);
     font-size: 12px; color: var(--muted); user-select: none;
   }
-  .head > div { position: relative; min-width: 0; overflow: visible; }
+  .head.table { display: grid; column-gap: 6px; }
+  .head:not(.table) .date { margin-left: auto; }
+  .head > div { position: relative; min-width: 0; overflow: visible; white-space: nowrap; }
+  .head .pick, .head .star { visibility: visible; opacity: 1; padding: 0; color: inherit; }
+  .head sup { font-size: 9px; }
   .head .date .split { left: -6px; right: auto; }
-  .head button { padding: 2px 0; border-radius: 0; text-align: left; color: inherit; }
+  .head button { padding: 2px 0; border-radius: 0; text-align: left; color: inherit; white-space: nowrap; }
   .head button:hover { background: none; color: var(--ink); }
   .head .on { color: var(--ink); font-weight: 600; }
   .head .date, .items.table .date { text-align: right; }

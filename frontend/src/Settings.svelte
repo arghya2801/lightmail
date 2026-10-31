@@ -127,7 +127,7 @@
           {/each}
         </div>
       </div>
-      <span class="hint muted">Compact fits more mail on screen: narrower panes and tighter rows. Cards lists mail beside the open message; Table shows sender, subject and date in columns above it (the buttons beside Sort switch too). Zoom scales the whole app; Ctrl+Shift+Plus / Minus / 0 work anywhere. Changes apply immediately.</span>
+      <span class="hint muted">Compact fits more mail on screen: narrower panes and tighter rows. Cards lists mail beside the open message; Table shows sender, subject and date in columns above it (the buttons beside the search box switch too). Click a column heading to sort by it; Shift+click adds more levels. Zoom scales the whole app; Ctrl+Shift+Plus / Minus / 0 work anywhere. Changes apply immediately.</span>
     </fieldset>
 
     <div><button class="primary" type="submit" disabled={!cfg.labels.length}>Save and sync</button></div>

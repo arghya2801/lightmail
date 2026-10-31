@@ -267,7 +267,7 @@ func TestReconcile(t *testing.T) {
 	}
 	s.prune([]string{"INBOX"})
 	got := ""
-	l, _ := s.List(Query{Label: "INBOX", Sort: "old"})
+	l, _ := s.List(Query{Label: "INBOX", Sort: "date:asc"})
 	for _, m := range l {
 		got += fmt.Sprintf("%d read=%v star=%v; ", m.ID, m.Read, m.Flagged)
 	}
@@ -475,5 +475,18 @@ func TestSweepImages(t *testing.T) {
 	}
 	if _, err := os.Stat(fresh); err != nil {
 		t.Error("fresh image swept")
+	}
+}
+
+func TestOrderBy(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                    "date DESC",
+		"date:asc":            "date ASC",
+		"star:desc,date:desc": "flagged DESC, date DESC",
+		"unread:desc,bogus,unread:asc,subject:asc": "read=0 DESC, subject COLLATE NOCASE ASC, date DESC",
+	} {
+		if got := orderBy(in); got != want {
+			t.Errorf("orderBy(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

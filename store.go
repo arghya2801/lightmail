@@ -362,11 +362,35 @@ type Query struct {
 	Offset int    `json:"offset"`
 }
 
-var sorts = map[string]string{
-	"new":    "date DESC",
-	"old":    "date ASC",
-	"sender": "from_name COLLATE NOCASE, date DESC",
-	"unread": "read, date DESC",
+// sortCols maps the column names in Query.Sort to SQL; Sort is "col:dir,..."
+// in priority order, e.g. "sender:asc,date:desc". Unknown parts are dropped.
+var sortCols = map[string]string{
+	"date":    "date",
+	"sender":  "coalesce(nullif(from_name,''),from_addr) COLLATE NOCASE",
+	"subject": "subject COLLATE NOCASE",
+	"unread":  "read=0",
+	"star":    "flagged",
+}
+
+func orderBy(sort string) string {
+	var parts []string
+	seen := map[string]bool{}
+	for _, t := range strings.Split(sort, ",") {
+		col, dir, _ := strings.Cut(t, ":")
+		if sortCols[col] == "" || seen[col] {
+			continue
+		}
+		seen[col] = true
+		if dir == "desc" {
+			parts = append(parts, sortCols[col]+" DESC")
+		} else {
+			parts = append(parts, sortCols[col]+" ASC")
+		}
+	}
+	if !seen["date"] {
+		parts = append(parts, "date DESC")
+	}
+	return strings.Join(parts, ", ")
 }
 
 // ftsQuery turns free text into an FTS5 prefix-AND query that can't syntax-error.
@@ -409,13 +433,9 @@ func scanMsg(row interface{ Scan(...any) error }, m *Msg) error {
 }
 
 func (s *Store) List(q Query) ([]Msg, error) {
-	order, ok := sorts[q.Sort]
-	if !ok {
-		order = sorts["new"]
-	}
 	w, args := where(q.Label, q.Sender, q.Search)
 	rows, err := s.db.Query(`SELECT `+msgCols+` FROM messages m WHERE `+w+
-		` ORDER BY `+order+` LIMIT ? OFFSET ?`, append(args, pageSize, q.Offset)...)
+		` ORDER BY `+orderBy(q.Sort)+` LIMIT ? OFFSET ?`, append(args, pageSize, q.Offset)...)
 	if err != nil {
 		return nil, err
 	}

@@ -13,7 +13,7 @@
   import { resize } from './resize.js'
 
   let view = $state('reader') // reader | settings
-  let q = $state({ label: '', sender: '', search: '', sort: 'new' })
+  let q = $state({ label: '', sender: '', search: '', sort: 'date:desc' })
   let items = $state([])
   let more = true
   let folders = $state([]) // every server folder, with local counts
@@ -34,8 +34,6 @@
   let listEl = $state()
   let mainEl = $state()
   let chipEl = $state()
-
-  const sorts = [['new', 'Newest first'], ['old', 'Oldest first'], ['sender', 'Sender A–Z'], ['unread', 'Unread first']]
 
   // System folders by role, in Gmail's order. User labels sit between them and Spam/Trash.
   const roleNames = { inbox: 'Inbox', flagged: 'Starred', important: 'Important', sent: 'Sent', drafts: 'Drafts', all: 'All Mail', archive: 'Archive', junk: 'Spam', trash: 'Trash' }
@@ -653,9 +651,6 @@
       {/if}
       <div class="tools">
         <input type="search" placeholder="Search all mail" aria-label="Search all mail" bind:this={searchEl} bind:value={q.search} />
-        <select bind:value={q.sort} aria-label="Sort">
-          {#each sorts as [v, text]}<option value={v}>{text}</option>{/each}
-        </select>
         <div class="layout" role="radiogroup" aria-label="Layout">
           {#each [['cards', 'Cards beside the message', 'M2 3h12M2 6h8M2 10h12M2 13h8'], ['table', 'Table above the message', 'M1.5 3h13M1.5 6.5h13M1.5 10h13M1.5 13.5h13M5.5 1.5v13']] as [v, text, d]}
             <button role="radio" aria-checked={look.layout === v} aria-label={text} title={text} class:on={look.layout === v}

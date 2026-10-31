@@ -61,7 +61,7 @@ What the actions do in Gmail: archive removes the Inbox label, and the message s
 
 Remote images load like any other part of the message. Because images double as read receipts, Settings can hide them; a message then offers **Load images** and **Always for this sender**. Attachments appear under the message header. Documents, images and media open in their usual app when clicked, marked as downloaded so Office opens them in Protected View; **Save** beside them saves a copy. Anything that could run code (programs, scripts, shortcuts, HTML, archives) can only be saved. Inline images in the message itself always show. Scripts in mail never run.
 
-Settings → Appearance switches between Comfortable (two-line rows) and Compact (one line per message), and sets the app zoom from 80% to 150%. Layout picks Cards (the list beside the message) or Table (sender, subject and date in columns above the message; click Sender or Date to sort). The two buttons next to Sort switch layouts too, and the choice is remembered.
+Settings → Appearance switches between Comfortable (two-line rows) and Compact (one line per message), and sets the app zoom from 80% to 150%. Layout picks Cards (the list beside the message) or Table (sender, subject and date in columns above the message). The two buttons next to the search box switch layouts too, and the choice is remembered.
 
 Drag any pane edge to resize it: the sidebar, the message list (its width, or its height in Table) and the Sender and Date columns. Double-click an edge to put it back. Sizes are remembered; a focused edge also moves with the arrow keys.
 
