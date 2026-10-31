@@ -459,7 +459,8 @@
     const el = mainEl
     if (!el || !msg) return d > 0 && step(1)
     if (d > 0 && el.scrollTop + el.clientHeight >= el.scrollHeight - 2) return step(1)
-    el.scrollBy({ top: d * el.clientHeight * 0.85 })
+    const head = el.querySelector('.sheet > header')?.offsetHeight ?? 0 // pinned, covers the top
+    el.scrollBy({ top: d * (el.clientHeight - head) * 0.85 })
   }
 
   let gPending = false
