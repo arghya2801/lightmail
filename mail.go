@@ -11,7 +11,6 @@ import (
 	"mime"
 	"net"
 	"net/http"
-	netmail "net/mail"
 	"net/netip"
 	"net/url"
 	"os"
@@ -268,15 +267,22 @@ func envMsg(buf *imapclient.FetchMessageBuffer) *Msg {
 	}
 	m.To = strings.Join(to, ", ")
 	for _, a := range e.To {
-		m.ToAddrs = append(m.ToAddrs, (&netmail.Address{Name: a.Name, Address: a.Addr()}).String())
+		m.ToAddrs = append(m.ToAddrs, recipient(a.Name, a.Addr()))
 	}
 	for _, a := range e.Cc {
-		m.CcAddrs = append(m.CcAddrs, (&netmail.Address{Name: a.Name, Address: a.Addr()}).String())
+		m.CcAddrs = append(m.CcAddrs, recipient(a.Name, a.Addr()))
 	}
 	if m.MessageID == "" {
 		m.MessageID = synthID(m)
 	}
 	return m
+}
+
+func recipient(name, address string) string {
+	if name != "" {
+		return name + " <" + address + ">"
+	}
+	return address
 }
 
 // synthID stands in for a missing Message-ID, stable across folders.
@@ -494,7 +500,7 @@ func parseMsg(raw []byte) (*Msg, error) {
 	}{{"To", &m.ToAddrs}, {"Cc", &m.CcAddrs}} {
 		if addresses, err := h.AddressList(field.name); err == nil {
 			for _, a := range addresses {
-				*field.addresses = append(*field.addresses, a.String())
+				*field.addresses = append(*field.addresses, recipient(a.Name, a.Address))
 			}
 		}
 	}

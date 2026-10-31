@@ -357,3 +357,15 @@ func TestAttachmentMetadataParts(t *testing.T) {
 		})
 	}
 }
+
+func TestRecipientDisplay(t *testing.T) {
+	want := "Jörg <person@example.com>"
+	m := envMsg(&imapclient.FetchMessageBuffer{Envelope: &imap.Envelope{To: []imap.Address{{Name: "Jörg", Mailbox: "person", Host: "example.com"}}}})
+	if len(m.ToAddrs) != 1 || m.ToAddrs[0] != want {
+		t.Fatalf("IMAP recipient display: %v", m.ToAddrs)
+	}
+	p, err := parseMsg([]byte("To: =?UTF-8?Q?J=C3=B6rg?= <person@example.com>\r\nCc: copy@example.com\r\n\r\nhello"))
+	if err != nil || len(p.ToAddrs) != 1 || p.ToAddrs[0] != want || len(p.CcAddrs) != 1 || p.CcAddrs[0] != "copy@example.com" {
+		t.Fatalf("MIME recipient display: %+v %v", p, err)
+	}
+}
