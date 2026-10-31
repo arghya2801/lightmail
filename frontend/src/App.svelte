@@ -26,6 +26,7 @@
   let dropOn = $state('') // folder under a drag
   let menu = $state(null) // { x, y, path, folder } while a label's right-click menu is open
   let sync = $state({ running: false, count: 0, error: '' })
+  let syncError = '' // the last finished sync's error, toasted once
   let syncedAt = $state(null)
   let toast = $state(null)
   let question = $state(null) // { text, ok, value, resolve } while ask() waits for an answer
@@ -309,7 +310,11 @@
     if (!ids.length) return
     const rows = rowsOf(ids)
     value ??= rows.some((m) => !m[key])
-    await SetFlags(ids, flag, value)
+    try {
+      await SetFlags(ids, flag, value)
+    } catch (e) {
+      return fail(`Couldn't ${key === 'read' ? (value ? 'mark read' : 'mark unread') : value ? 'star' : 'unstar'}. ${e}`)
+    }
     for (const m of rows) m[key] = value
     if (msg && ids.includes(msg.id)) msg[key] = value
     if (key === 'read') counts()
@@ -317,7 +322,11 @@
   const setRead = (value) => flag('\\Seen', 'read', value)
   const setStar = (value) => flag('\\Flagged', 'flagged', value)
   async function star(m) {
-    await SetFlags([m.id], '\\Flagged', !m.flagged)
+    try {
+      await SetFlags([m.id], '\\Flagged', !m.flagged)
+    } catch (e) {
+      return fail(`Couldn't ${m.flagged ? 'unstar' : 'star'}. ${e}`)
+    }
     m.flagged = !m.flagged
     if (msg?.id === m.id) msg.flagged = m.flagged
   }
@@ -580,9 +589,14 @@
     if (!cfg.password || !cfg.labels?.length) view = 'settings'
     counts()
     sync = await GetSyncStatus() // the first sync starts before this page listens
+    if (sync.error && !sync.running) fail('Sync failed: ' + (syncError = sync.error))
     return EventsOn('sync', (s) => {
       sync = s
-      if (!s.running) syncedAt = new Date()
+      if (!s.running) {
+        if (s.error && s.error !== syncError) fail('Sync failed: ' + s.error)
+        syncError = s.error
+        syncedAt = new Date()
+      }
       if (!s.running || items.length < 100) {
         counts()
         load(true, true)
