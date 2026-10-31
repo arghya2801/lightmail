@@ -72,7 +72,7 @@
   <header>
     <h1>{msg.subject || '(no subject)'}</h1>
     <p class="by muted">
-      <span class="who" title={msg.fromAddr}>{msg.fromName}</span>{#if msg.to}&ensp;to {msg.to}{/if}, {date}
+      <span class="who">{msg.fromName || msg.fromAddr}</span>{#if msg.fromAddr && msg.fromName !== msg.fromAddr}&ensp;&lt;{msg.fromAddr}&gt;{/if}{#if msg.to}&ensp;to {msg.to}{/if}, {date}
     </p>
     {#if chips.length}
       <p class="chips">{#each chips as c}<span class="chip">{c}</span>{/each}</p>

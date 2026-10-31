@@ -48,7 +48,7 @@
         onclick={(e) => { e.stopPropagation(); ontoggle(m) }} />
       <button class="star" class:on={m.flagged} aria-label={m.flagged ? 'Unstar' : 'Star'} title="{m.flagged ? 'Unstar' : 'Star'} (s)"
         onclick={(e) => { e.stopPropagation(); onstar(m) }}>{m.flagged ? '★' : '☆'}</button>
-      <span class="from">{m.fromName || m.fromAddr || '(unknown sender)'}</span>
+      <span class="from" title={m.fromAddr}>{m.fromName || m.fromAddr || '(unknown sender)'}</span>
       <span class="date">{fmtDate(m.date)}</span>
       <span class="subj">{m.subject || '(no subject)'}</span>
     </div>
