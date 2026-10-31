@@ -152,9 +152,10 @@
     selected.clear()
   }
 
-  // Toasts fade after 6 seconds unless hovered; errors stay until dismissed.
+  // Toasts fade after 6 seconds (10 with Undo) unless hovered; errors stay until dismissed.
+  // A plain toast joins an Undo toast instead of replacing it.
   function flash(text, action, fn) {
-    toast = { text, action, fn }
+    toast = !action && toast?.action && !toast.error ? { ...toast, text: `${toast.text} ${text}` } : { text, action, fn }
     later()
   }
   function fail(text) {
@@ -163,7 +164,7 @@
   }
   function later() {
     clearTimeout(flash.t)
-    if (!toast?.error) flash.t = setTimeout(() => (toast = null), 6000)
+    if (!toast?.error) flash.t = setTimeout(() => (toast = null), toast?.action ? 10000 : 6000)
   }
 
   // In-app stand-in for confirm() and prompt(): resolves to true, the typed text, or null.
@@ -284,7 +285,7 @@
     finished()
     counts()
     const undo = moved?.length && moved.every((m) => m.uid)
-    flash(`${done[kind](to)}${n > 1 ? `: ${n} messages` : ''}.`, undo && 'Undo', async () => {
+    flash(`${done[kind](to)}${n > 1 ? `: ${n} messages` : ''}.`, undo && 'Undo (z)', async () => {
       try {
         await Undo(moved)
       } catch (e) {
