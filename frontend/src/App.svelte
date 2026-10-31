@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import { SvelteSet } from 'svelte/reactivity'
   import {
     GetConfig, GetSyncStatus, Folders, Senders, List, Open, AllowImages, SetFlags, SaveEmail, SaveAttachment, OpenAttachment, Sync, SetAppearance, SetReaderZoom,
@@ -132,6 +132,10 @@
   let timer
   $effect(() => {
     const { label, sender, search, sort } = q
+    untrack(() => {
+      selected.clear() // rows the new filter hides mustn't stay picked
+      anchor = null
+    })
     clearTimeout(timer)
     timer = setTimeout(() => load(true), search ? 200 : 0)
   })
