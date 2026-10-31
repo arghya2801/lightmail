@@ -558,10 +558,11 @@
     ['f / j', 'Next message'], ['d / k', 'Previous message'], ['Space / Shift+Space', 'Page through the message, then open the next'],
     ['e', 'Archive'], ['# / Delete', 'Delete (in Trash or Spam: delete forever)'], ['!', 'Report spam (in Spam: not spam)'],
     ['z', 'Undo, while its toast is showing'], ['v', 'Move to…'], ['c / l', 'Add label…'], ['s', 'Star or unstar'],
-    ['t', 'Mark read or unread'], ['x', 'Select the open message'], ['Ctrl+A / Esc', 'Select all loaded messages / clear the selection'],
+    ['t', 'Mark read or unread'], ['Shift+I / Shift+U', 'Mark read / unread'], ['x', 'Select the open message'], ['Ctrl+A / Esc', 'Select all loaded messages / clear the selection'], ['Ctrl+click / Shift+click', 'Select one more / a range'],
     ['Ctrl+F / /', 'Search all mail'], ['g 1 … g 9', 'Open the nth folder in the sidebar'], ['g f / g l', 'Go to any folder or label'],
     ['g i', 'Inbox'], ['g s', 'Settings'], ['Shift+T', 'Switch between Cards and Table'], ['r', 'Sync now'],
     ['Shift+S', 'Save the message as HTML'], ['Ctrl+Plus / Minus / 0', 'Zoom the message'], ['Ctrl+Shift+Plus / Minus / 0', 'Zoom the whole app'],
+    ['Click / Shift+click a heading', 'Sort by that column / add it as another level'], ['Right-click or Menu key on a label', 'Rename, delete or create a label inside it'],
   ]
 
   // Open the label menu leftward or upward when it would run off the window.
