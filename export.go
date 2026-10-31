@@ -31,17 +31,20 @@ func safeName(name string) string {
 }
 
 // saveEmail writes m to saveDir as self-contained HTML, images inlined.
-func saveEmail(dataDir, saveDir string, m Msg) (string, error) {
+func saveEmail(dataDir, saveDir string, m Msg, images bool) (string, error) {
 	if err := os.MkdirAll(saveDir, 0o755); err != nil {
 		return "", err
 	}
 	out := rewrite(m.HTML, func(u string) string {
+		if !images {
+			return ""
+		}
 		b, ct, err := fetchImage(dataDir, u)
 		if err != nil {
-			return u
+			return ""
 		}
 		return "data:" + ct + ";base64," + base64.StdEncoding.EncodeToString(b)
-	})
+	}, images)
 	out = strings.Replace(out, "<head>", "<head><meta charset=\"utf-8\"><title>"+html.EscapeString(m.Subject)+"</title>", 1)
 	path := filepath.Join(saveDir, fileName(m, ".html"))
 	return path, os.WriteFile(path, []byte(out), 0o644)

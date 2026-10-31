@@ -30,13 +30,15 @@ export function Open(arg1:number,arg2:boolean):Promise<main.Msg>;
 
 export function OpenAttachment(arg1:number,arg2:number):Promise<void>;
 
+export function OpenLink(arg1:string):Promise<void>;
+
 export function RenameLabel(arg1:string,arg2:string):Promise<void>;
 
 export function SaveAttachment(arg1:number,arg2:number):Promise<string>;
 
 export function SaveConfig(arg1:main.Config):Promise<void>;
 
-export function SaveEmail(arg1:number):Promise<string>;
+export function SaveEmail(arg1:number,arg2:boolean):Promise<string>;
 
 export function Senders(arg1:string):Promise<Array<main.Count>>;
 

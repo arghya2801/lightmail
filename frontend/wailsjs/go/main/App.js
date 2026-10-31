@@ -58,6 +58,10 @@ export function OpenAttachment(arg1, arg2) {
   return window['go']['main']['App']['OpenAttachment'](arg1, arg2);
 }
 
+export function OpenLink(arg1) {
+  return window['go']['main']['App']['OpenLink'](arg1);
+}
+
 export function RenameLabel(arg1, arg2) {
   return window['go']['main']['App']['RenameLabel'](arg1, arg2);
 }
@@ -70,8 +74,8 @@ export function SaveConfig(arg1) {
   return window['go']['main']['App']['SaveConfig'](arg1);
 }
 
-export function SaveEmail(arg1) {
-  return window['go']['main']['App']['SaveEmail'](arg1);
+export function SaveEmail(arg1, arg2) {
+  return window['go']['main']['App']['SaveEmail'](arg1, arg2);
 }
 
 export function Senders(arg1) {

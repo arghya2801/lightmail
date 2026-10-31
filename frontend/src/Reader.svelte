@@ -1,8 +1,9 @@
 <script>
-  import { BrowserOpenURL } from '../wailsjs/runtime/runtime'
+  import { OpenLink } from '../wailsjs/go/main/App'
 
   // actions: [{ label, key, run }] for this message, built by App so the bulk panel shares them.
-  let { msg, actions, chips, onkey, zoom, onzoom, onsave, onattach, onimages } = $props()
+  let { msg, actions, chips, onkey, zoom, onzoom, onsave, onattach, onimages, onerror } = $props()
+  const brief = (addresses) => addresses.slice(0, 2).join(', ') + (addresses.length > 2 ? ` +${addresses.length - 2}` : '')
 
   const kb = (n) => (n < 1024 * 1024 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1024 / 1024).toFixed(1) + ' MB')
 
@@ -10,9 +11,9 @@
 
   // Mail is designed for white; keep that whatever the app theme.
   const inject = `<style>html{background:#fff;overflow:hidden}</style>`
-  const srcdoc = msg.html.includes('</head>') ? msg.html.replace('</head>', inject + '</head>') : inject + msg.html
+  const srcdoc = $derived(msg.html.includes('</head>') ? msg.html.replace('</head>', inject + '</head>') : inject + msg.html)
 
-  const date = new Date(msg.date * 1000).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  const date = $derived(new Date(msg.date * 1000).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }))
 
   // Size the frame to its content so the pane scrolls, not the frame. Zoom is applied
   // inside the frame; fixed-width mail zoomed past the pane widens it instead of clipping.
@@ -58,10 +59,20 @@
     new ResizeObserver(() => size(doc.body) !== settled && fit()).observe(doc.body)
     doc.addEventListener('wheel', onwheel, { passive: false })
     doc.addEventListener('click', (e) => {
-      const a = e.target.closest?.('a[href]')
+      const a = e.target.closest?.('a')
       if (a) {
         e.preventDefault()
-        if (/^(https?|mailto):/i.test(a.href)) BrowserOpenURL(a.href)
+        const href = (a.getAttribute('href') ?? a.getAttribute('xlink:href') ?? '').trim()
+        if (href.startsWith('#')) {
+          try { doc.getElementById(decodeURIComponent(href.slice(1)))?.scrollIntoView() } catch {}
+          return
+        }
+        if (!href) return
+        try {
+          const raw = href.startsWith('//') ? 'https:' + href : /^www\./i.test(href) ? 'https://' + href : href
+          const url = new URL(raw, doc.baseURI)
+          OpenLink(url.href).catch((err) => onerror("Couldn't open the link. " + err))
+        } catch (err) { onerror("Couldn't open the link. " + err) }
       }
     })
     doc.addEventListener('keydown', onkey)
@@ -72,8 +83,17 @@
   <header>
     <h1>{msg.subject || '(no subject)'}</h1>
     <p class="by muted">
-      <span class="who">{msg.fromName || msg.fromAddr}</span>{#if msg.fromAddr && msg.fromName !== msg.fromAddr}&ensp;&lt;{msg.fromAddr}&gt;{/if}{#if msg.to}&ensp;to {msg.to}{/if}, {date}
+      <span class="who">{msg.fromName || msg.fromAddr}</span>{#if msg.fromAddr && msg.fromName !== msg.fromAddr}&ensp;&lt;{msg.fromAddr}&gt;{/if}, {date}
     </p>
+    {#if msg.toAddrs?.length || msg.ccAddrs?.length}
+      <details class="recipients">
+        <summary title={[msg.toAddrs?.length ? 'To: ' + msg.toAddrs.join(', ') : '', msg.ccAddrs?.length ? 'Cc: ' + msg.ccAddrs.join(', ') : ''].filter(Boolean).join('\n')}>
+          {#if msg.toAddrs?.length}to {brief(msg.toAddrs)}{/if}{#if msg.ccAddrs?.length}{msg.toAddrs?.length ? ', ' : ''}cc {brief(msg.ccAddrs)}{/if}
+        </summary>
+        {#if msg.toAddrs?.length}<p>To: {msg.toAddrs.join(', ')}</p>{/if}
+        {#if msg.ccAddrs?.length}<p>Cc: {msg.ccAddrs.join(', ')}</p>{/if}
+      </details>
+    {:else if msg.to}<p class="muted recipients">to {msg.to}</p>{/if}
     {#if chips.length || msg.attachments?.length}
       <!-- Capped, so many labels or attachments can't fill the pinned header. -->
       <div class="extra">
@@ -132,6 +152,9 @@
     margin: 0 0 10px; text-wrap: balance;
   }
   .by { margin: 0 0 12px; }
+  .recipients { margin: 0 0 12px; overflow-wrap: anywhere; max-height: 20vh; overflow-y: auto; }
+  .recipients summary { cursor: pointer; }
+  .recipients p { margin: 4px 0; }
   .who { color: var(--ink); }
   .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 12px; }
   .files { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; padding: 0; }
