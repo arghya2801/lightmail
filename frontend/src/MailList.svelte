@@ -31,6 +31,8 @@
     onsort(next.length ? next.map((k) => k.join(':')).join(',') : 'date:desc')
   }
   const cols = { unread: 'Unread', star: 'Starred', sender: 'Sender', subject: 'Subject', date: 'Date' }
+  const dirNames = { sender: ['A to Z', 'Z to A'], subject: ['A to Z', 'Z to A'], date: ['oldest first', 'newest first'], unread: ['read first', 'unread first'], star: ['unstarred first', 'starred first'] }
+  const dirName = (col, d) => dirNames[col][d === 'desc' ? 1 : 0]
   const full = (s) => new Date(s * 1000).toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'short' })
 
   function onscroll(e) {
@@ -42,14 +44,15 @@
 {#snippet heading(col, text)}
   {@const i = keys.findIndex(([c]) => c === col)}
   <button class:on={i >= 0} onclick={(e) => sortBy(col, e)}
-    title="Sort by {cols[col]}; Shift+click adds it as another level" aria-label="Sort by {cols[col]}">
+    title="Sort by {cols[col]}. Shift+click adds it as another level; again reverses it, a third time removes it."
+    aria-label="Sort by {cols[col]}{i >= 0 ? `, sorted ${dirName(col, keys[i][1])}${keys.length > 1 ? `, level ${i + 1} of ${keys.length}` : ''}` : ''}">
     {text}{#if i >= 0}{keys[i][1] === 'desc' ? ' ↓' : ' ↑'}{#if keys.length > 1}<sup>{i + 1}</sup>{/if}{/if}
   </button>
 {/snippet}
 
 <div class="head" class:table>
-  <div class="pick">{@render heading('unread', '●')}</div>
-  <div class="star">{@render heading('star', '★')}</div>
+  <div class="pick">{@render heading('unread', table ? '●' : 'Unread')}</div>
+  <div class="star">{@render heading('star', table ? '★' : 'Starred')}</div>
   <div class="from">
     {@render heading('sender', 'Sender')}
     {#if table}<div class="split x" use:resize={{ name: '--col-from', min: 80, max: 600, label: 'Resize the Sender column' }}></div>{/if}
