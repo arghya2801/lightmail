@@ -74,18 +74,24 @@
     <p class="by muted">
       <span class="who">{msg.fromName || msg.fromAddr}</span>{#if msg.fromAddr && msg.fromName !== msg.fromAddr}&ensp;&lt;{msg.fromAddr}&gt;{/if}{#if msg.to}&ensp;to {msg.to}{/if}, {date}
     </p>
-    {#if chips.length}
-      <p class="chips">{#each chips as c}<span class="chip">{c}</span>{/each}</p>
-    {/if}
-    {#if msg.attachments?.length}
-      <ul class="files" aria-label="Attachments">
-        {#each msg.attachments as f, i}
-          <li>
-            <button onclick={() => onattach(i, f.open)} title="{f.open ? 'Open' : 'Save'} {f.name}">{f.name} <span class="muted">{kb(f.size)}</span></button>
-            {#if f.open}<button class="save" onclick={() => onattach(i, false)} title="Save {f.name}">Save</button>{/if}
-          </li>
-        {/each}
-      </ul>
+    {#if chips.length || msg.attachments?.length}
+      <!-- Capped, so many labels or attachments can't fill the pinned header. -->
+      <div class="extra">
+        {#if chips.length}
+          <p class="chips">{#each chips as c}<span class="chip">{c}</span>{/each}</p>
+        {/if}
+        {#if msg.attachments?.length}
+          <ul class="files" aria-label="Attachments">
+            {#each msg.attachments as f, i}
+              <li>
+                <span class="name" title={f.name}>{f.name} <span class="muted">{kb(f.size)}</span></span>
+                {#if f.open}<button onclick={() => onattach(i, true)} title="Open {f.name}">Open</button>{/if}
+                <button onclick={() => onattach(i, false)} title="Save {f.name}">Save</button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
     {/if}
     <div class="actions">
       {#each actions as a (a.label)}<button onclick={a.run} title="{a.label} ({a.key})">{a.label}</button>{/each}
@@ -129,9 +135,11 @@
   .who { color: var(--ink); }
   .chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 12px; }
   .files { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; padding: 0; }
-  .files li { display: flex; }
-  .files button { border: 1px solid var(--rule); padding: 3px 10px; }
-  .files .save { border-left: 0; color: var(--muted); }
+  .extra { max-height: calc(30vh / var(--scale, 1)); overflow-y: auto; margin: 0 0 12px; }
+  .extra > :last-child { margin-bottom: 0; }
+  .files li { display: flex; border: 1px solid var(--rule); border-radius: 3px; min-width: 0; }
+  .files .name { padding: 3px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 32ch; }
+  .files button { border-left: 1px solid var(--rule); border-radius: 0; padding: 3px 10px; }
   .files .muted { font-size: 12px; margin-left: 4px; }
   .chip { font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--chrome); color: var(--muted); }
   .actions { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-left: -8px; }
