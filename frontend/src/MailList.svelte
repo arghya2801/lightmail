@@ -31,6 +31,7 @@
     onsort(next.length ? next.map((k) => k.join(':')).join(',') : 'date:desc')
   }
   const cols = { unread: 'Unread', star: 'Starred', sender: 'Sender', subject: 'Subject', date: 'Date' }
+  const full = (s) => new Date(s * 1000).toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'short' })
 
   function onscroll(e) {
     const t = e.currentTarget
@@ -71,7 +72,7 @@
       <button class="star" class:on={m.flagged} aria-label={m.flagged ? 'Unstar' : 'Star'} title="{m.flagged ? 'Unstar' : 'Star'} (s)"
         onclick={(e) => { e.stopPropagation(); onstar(m) }}>{m.flagged ? '★' : '☆'}</button>
       <span class="from" title={m.fromAddr}>{m.fromName || m.fromAddr || '(unknown sender)'}</span>
-      <span class="date">{fmtDate(m.date)}</span>
+      <span class="date" title={full(m.date)}>{fmtDate(m.date)}</span>
       <span class="subj">{m.subject || '(no subject)'}</span>
     </div>
   {:else}

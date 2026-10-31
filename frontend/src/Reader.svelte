@@ -12,7 +12,7 @@
   const inject = `<style>html{background:#fff;overflow:hidden}</style>`
   const srcdoc = msg.html.includes('</head>') ? msg.html.replace('</head>', inject + '</head>') : inject + msg.html
 
-  const date = new Date(msg.date * 1000).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  const date = new Date(msg.date * 1000).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
   // Size the frame to its content so the pane scrolls, not the frame. Zoom is applied
   // inside the frame; fixed-width mail zoomed past the pane widens it instead of clipping.
