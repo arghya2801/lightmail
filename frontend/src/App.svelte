@@ -15,7 +15,7 @@
   let view = $state('reader') // reader | settings
   let q = $state({ label: '', sender: '', search: '', sort: 'date:desc' })
   let items = $state([])
-  let more = true
+  let more = $state(true)
   let folders = $state([]) // every server folder, with local counts
   let senders = $state([])
   let senderFilter = $state('')
@@ -670,6 +670,14 @@
           {/each}
         </div>
       </div>
+      {#if q.search || q.sender}
+        <div class="scope">
+          <span>{q.search || !q.label ? 'All mail' : label(q.label)}</span>
+          {#if q.search}<button onclick={() => (q.search = '')} title="Clear the search">“{q.search}” ×</button>{/if}
+          {#if q.sender}<button onclick={() => (q.sender = '')} title="Show every sender">from {senders.find((s) => s.key === q.sender)?.name || q.sender} ×</button>{/if}
+          <span class="n" title="Messages loaded">{items.length}{more ? '+' : ''}</span>
+        </div>
+      {/if}
       <MailList {items} {selected} current={msg?.id} bind:el={listEl} onpick={pick} ontoggle={toggle} onstar={star} ondragstart={dragstart}
         table={look.layout === 'table'} sort={q.sort} onsort={(s) => (q.sort = s)}
         onmore={() => more && ((more = false), load(false))}>
@@ -808,6 +816,9 @@
   .sync .warn { color: var(--warn); }
 
   .list { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--rule); }
+  .scope { display: flex; align-items: center; gap: 6px; padding: 4px var(--row-px) 4px 12px; border-bottom: 1px solid var(--rule); font-size: 12px; min-width: 0; }
+  .scope button { padding: 1px 8px; border-radius: 10px; background: var(--chrome); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .scope .n { margin-left: auto; }
   .tools { display: flex; gap: 8px; padding: var(--tools-p); border-bottom: 1px solid var(--rule); }
   .tools input { flex: 1; min-width: 0; }
   .layout { display: flex; flex: none; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); }
