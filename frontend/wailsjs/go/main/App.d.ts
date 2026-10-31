@@ -40,7 +40,7 @@ export function SaveEmail(arg1:number):Promise<string>;
 
 export function Senders(arg1:string):Promise<Array<main.Count>>;
 
-export function ServerFolders():Promise<Array<main.ServerFolder>>;
+export function ServerFolders(arg1:string,arg2:string):Promise<Array<main.ServerFolder>>;
 
 export function SetAppearance(arg1:string,arg2:string,arg3:number):Promise<void>;
 

@@ -34,6 +34,7 @@
   let listEl = $state()
   let mainEl = $state()
   let chipEl = $state()
+  let settingsDirty = $state(false)
 
   // System folders by role, in Gmail's order. User labels sit between them and Spam/Trash.
   const roleNames = { inbox: 'Inbox', flagged: 'Starred', important: 'Important', sent: 'Sent', drafts: 'Drafts', all: 'All Mail', archive: 'Archive', junk: 'Spam', trash: 'Trash' }
@@ -143,7 +144,13 @@
     Senders(from).then((s) => (senders = s ?? []))
   })
 
-  function go(name) {
+  // Leaving Settings with unsaved edits asks first; false means stay.
+  async function leave() {
+    return view !== 'settings' || !settingsDirty || !!(await ask('Discard your unsaved changes to Settings?', 'Discard'))
+  }
+
+  async function go(name) {
+    if (!(await leave())) return
     if (name !== q.label) msg = null // its actions would use the new folder as the source
     q.label = name
     q.sender = ''
@@ -180,6 +187,7 @@
 
   // Show the headers at once; the body follows when it has downloaded.
   async function open(m) {
+    if (!(await leave())) return
     view = 'reader'
     msg = { ...$state.snapshot(m), html: '', labels: [], loading: true }
     let full
@@ -633,7 +641,7 @@
       </div>
       {#each visibleSenders as s (s.key)}
         <button class="row sender" class:on={q.sender === s.key} title={s.key}
-          onclick={() => ((q.sender = q.sender === s.key ? '' : s.key), (view = 'reader'))}>
+          onclick={async () => (await leave()) && ((q.sender = q.sender === s.key ? '' : s.key), (view = 'reader'))}>
           <span>{s.name}</span>{#if s.unread}<span class="n">{s.unread}</span>{/if}
         </button>
       {/each}
@@ -694,7 +702,7 @@
 
   <main class="main" bind:this={mainEl}>
     {#if view === 'settings'}
-      <Settings onsaved={() => { view = 'reader'; Sync() }} {look} onlook={setLook} />
+      <Settings onsaved={() => { view = 'reader'; Sync() }} {look} onlook={setLook} bind:dirty={settingsDirty} />
     {:else if selected.size > 1 || (selected.size && !selected.has(msg?.id))}
       <div class="bulk">
         <h1>{selected.size} selected</h1>

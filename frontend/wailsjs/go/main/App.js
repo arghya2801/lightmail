@@ -78,8 +78,8 @@ export function Senders(arg1) {
   return window['go']['main']['App']['Senders'](arg1);
 }
 
-export function ServerFolders() {
-  return window['go']['main']['App']['ServerFolders']();
+export function ServerFolders(arg1, arg2) {
+  return window['go']['main']['App']['ServerFolders'](arg1, arg2);
 }
 
 export function SetAppearance(arg1, arg2, arg3) {

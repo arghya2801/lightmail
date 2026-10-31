@@ -122,21 +122,28 @@ type ServerFolder struct {
 	Default bool   `json:"default"` // ticked unless the user says otherwise
 }
 
-// ServerFolders lists the account's folders for the Settings picker.
-func (a *App) ServerFolders() ([]ServerFolder, error) {
+// ServerFolders lists the account's folders for the Settings picker. It signs in
+// with the address and password being edited, so nothing is saved until Save.
+func (a *App) ServerFolders(user, password string) ([]ServerFolder, error) {
+	c := a.config()
+	c.User, c.Password = user, password
+	if c.Host == "" {
+		c.Host = "imap.gmail.com:993"
+	}
+	cl, err := dial(c, clientOpts)
+	if err != nil {
+		return nil, err
+	}
+	defer cl.Logout()
+	fs, err := listFolders(cl)
+	if err != nil {
+		return nil, err
+	}
 	var out []ServerFolder
-	err := a.imap(func(s *session) error {
-		fs, err := listFolders(s.cl)
-		if err != nil {
-			return err
-		}
-		a.store.setFolders(fs)
-		for _, f := range fs {
-			out = append(out, ServerFolder{f.Name, defaultSynced(f)})
-		}
-		return nil
-	})
-	return out, err
+	for _, f := range fs {
+		out = append(out, ServerFolder{f.Name, defaultSynced(f)})
+	}
+	return out, nil
 }
 
 func (a *App) ChooseSaveDir() (string, error) {

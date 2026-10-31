@@ -8,12 +8,18 @@
   import { BrowserOpenURL } from '../wailsjs/runtime/runtime'
 
   // look is the live appearance, owned by App so keyboard zoom and this page agree.
-  let { onsaved, look, onlook } = $props()
+  // dirty tells App there are unsaved edits, so leaving can ask first.
+  let { onsaved, look, onlook, dirty = $bindable(false) } = $props()
   let cfg = $state(null)
   let serverLabels = $state([])
   let filter = $state('')
   let busy = $state(false)
   let error = $state('')
+  let saveError = $state('')
+  let saved = '' // cfg as last loaded or saved
+  $effect(() => {
+    dirty = !!cfg && JSON.stringify(cfg) !== saved
+  })
 
   let shown = $derived(
     [...new Set([...(cfg?.labels ?? []), ...serverLabels])]
@@ -24,14 +30,14 @@
   onMount(async () => {
     cfg = await GetConfig()
     cfg.labels ??= []
+    saved = JSON.stringify(cfg)
   })
 
   async function loadLabels() {
     busy = true
     error = ''
     try {
-      await SaveConfig(cfg)
-      const fs = (await ServerFolders()) ?? []
+      const fs = (await ServerFolders(cfg.user, cfg.password)) ?? []
       serverLabels = fs.map((f) => f.name)
       // First time: tick everything except folders that only repeat others (All Mail, Important).
       if (!cfg.labels.length) cfg.labels = fs.filter((f) => f.default).map((f) => f.name)
@@ -52,7 +58,15 @@
 
   async function save(e) {
     e.preventDefault()
-    await SaveConfig({ ...cfg, ...look, syncMinutes: +cfg.syncMinutes || 15 })
+    saveError = ''
+    try {
+      await SaveConfig({ ...cfg, ...look, syncMinutes: +cfg.syncMinutes || 15 })
+    } catch (e) {
+      saveError = "Couldn't save. " + e
+      return
+    }
+    saved = JSON.stringify(cfg)
+    dirty = false
     onsaved()
   }
 </script>
@@ -130,7 +144,11 @@
       <span class="hint muted">Compact fits more mail on screen: narrower panes and tighter rows. Cards lists mail beside the open message; Table shows sender, subject and date in columns above it (the buttons beside the search box switch too). Click a column heading to sort by it; Shift+click adds more levels. Zoom scales the whole app; Ctrl+Shift+Plus / Minus / 0 work anywhere. Changes apply immediately.</span>
     </fieldset>
 
-    <div><button class="primary" type="submit" disabled={!cfg.labels.length}>Save and sync</button></div>
+    <div>
+      <button class="primary" type="submit" disabled={!cfg.labels.length}>Save and sync</button>
+      {#if !cfg.labels.length}<span class="hint muted">Pick at least one label to sync.</span>{/if}
+      {#if saveError}<p class="error" role="alert">{saveError}</p>{/if}
+    </div>
   </form>
 {/if}
 
