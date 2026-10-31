@@ -324,8 +324,10 @@
 
   async function loadImages(always) {
     try {
+      const id = msg.id
       if (always) await AllowImages(msg.fromAddr)
-      msg = await Open(msg.id, true)
+      const full = await Open(id, true)
+      if (msg?.id === id) msg = full // unless another message was opened meanwhile
     } catch (e) {
       fail("Couldn't load images. " + e)
     }
