@@ -51,8 +51,8 @@
 {/snippet}
 
 <div class="head" class:table>
-  <div class="pick">{@render heading('unread', table ? '●' : 'Unread')}</div>
-  <div class="star">{@render heading('star', table ? '★' : 'Starred')}</div>
+  <div class="pick">{@render heading('unread', '●')}</div>
+  <div class="star">{@render heading('star', '★')}</div>
   <div class="from">
     {@render heading('sender', 'Sender')}
     {#if table}<div class="split x" use:resize={{ name: '--col-from', min: 80, max: 600, label: 'Resize the Sender column' }}></div>{/if}
@@ -87,14 +87,17 @@
   .items { overflow-y: auto; flex: 1; }
   .item {
     display: grid; align-items: center; column-gap: 6px; row-gap: var(--row-gap);
-    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    grid-template-columns: 16px 18px minmax(0, 1fr) auto;
     grid-template-areas: 'pick star from date' 'pick star subj subj';
     padding: var(--row-py) var(--row-px) var(--row-py) 6px; border-bottom: 1px solid var(--rule);
     cursor: default; user-select: none; border-left: 3px solid transparent;
     content-visibility: auto; contain-intrinsic-size: auto 60px; /* skip layout and paint for rows out of view */
   }
-  :global([data-density='compact']) .item {
-    grid-template-columns: auto auto minmax(0, 9em) minmax(0, 1fr) auto;
+  /* Headings share the rows' columns. Cards rows put the subject under the sender,
+     so there Subject sits beside Sender. */
+  .head { grid-template-columns: 16px 18px auto minmax(0, 1fr) auto; grid-template-areas: 'pick star from subj date'; }
+  :global([data-density='compact']) .item, :global([data-density='compact']) .head {
+    grid-template-columns: 16px 18px minmax(0, 9em) minmax(0, 1fr) auto;
     grid-template-areas: 'pick star from subj date';
   }
   /* Table: fixed columns, so rows line up under the headings. */
@@ -102,19 +105,19 @@
     grid-template-columns: 16px 18px var(--col-from, minmax(0, 1.2fr)) minmax(0, 3fr) var(--col-date, 7.5em);
     grid-template-areas: 'pick star from subj date';
   }
-  /* Same scrollbar gutter on both, so the fr columns match. */
-  .head, .items.table { overflow-y: hidden; scrollbar-gutter: stable; }
-  .items.table { overflow-y: auto; }
+  /* Same scrollbar gutter on both, so the columns match. */
+  .head, .items { scrollbar-gutter: stable; }
+  .head { overflow-y: hidden; }
   .items.table .item { padding-top: calc(var(--row-py) * 0.6); padding-bottom: calc(var(--row-py) * 0.6); }
   .head {
-    display: flex; column-gap: 10px; align-items: center;
+    display: grid; column-gap: 6px; align-items: center;
     padding: 2px var(--row-px) 2px 6px; border-left: 3px solid transparent; border-bottom: 1px solid var(--rule);
-    font-size: 12px; color: var(--muted); user-select: none;
+    color: var(--muted); user-select: none;
   }
-  .head.table { display: grid; column-gap: 6px; }
-  .head:not(.table) .date { margin-left: auto; }
-  .head > div { position: relative; min-width: 0; overflow: visible; white-space: nowrap; }
+  /* Small text on the cells, not the row: the row's font size sets the em-based columns, which must match the rows'. */
+  .head > div { position: relative; min-width: 0; overflow: visible; white-space: nowrap; font-size: 12px; }
   .head .pick, .head .star { opacity: 1; padding: 0; color: inherit; }
+  .head .pick button, .head .star button { width: 100%; text-align: center; }
   .head sup { font-size: 9px; }
   .head .date .split { left: -6px; right: auto; }
   .head button { padding: 2px 0; border-radius: 0; text-align: left; color: inherit; white-space: nowrap; }
