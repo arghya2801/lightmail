@@ -13,7 +13,7 @@
   import { resize } from './resize.js'
 
   let view = $state('reader') // reader | settings
-  let q = $state({ label: '', sender: '', search: '', sort: 'date:desc' })
+  let q = $state({ label: '', sender: '', search: '', sort: stored('sort', 'date:desc') })
   let items = $state([])
   let more = $state(true)
   let folders = $state([]) // every server folder, with local counts
@@ -704,7 +704,7 @@
         </div>
       {/if}
       <MailList {items} {selected} current={msg?.id} bind:el={listEl} onpick={pick} ontoggle={toggle} onstar={star} ondragstart={dragstart}
-        table={look.layout === 'table'} sort={q.sort} onsort={(s) => (q.sort = s)}
+        table={look.layout === 'table'} sort={q.sort} onsort={(s) => { q.sort = s; localStorage.setItem('sort', JSON.stringify(s)) }}
         onmore={() => more && ((more = false), load(false))}>
         {#snippet empty()}
           {#if q.search || q.sender}Nothing matches. Clear the search or pick another sender.
