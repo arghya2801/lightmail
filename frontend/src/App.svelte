@@ -676,7 +676,7 @@
   <main class="main" bind:this={mainEl}>
     {#if view === 'settings'}
       <Settings onsaved={() => { view = 'reader'; Sync() }} {look} onlook={setLook} />
-    {:else if selected.size > 1}
+    {:else if selected.size > 1 || (selected.size && !selected.has(msg?.id))}
       <div class="bulk">
         <h1>{selected.size} selected</h1>
         <div class="actions">
