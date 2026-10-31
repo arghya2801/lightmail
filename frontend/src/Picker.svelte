@@ -11,6 +11,8 @@
     filter
     at = 0
   })
+  let list = $state()
+  $effect(() => list?.children[at]?.scrollIntoView({ block: 'nearest' })) // keep the highlight in view
 
   function onkeydown(e) {
     e.stopPropagation() // keep j/k/e from reaching the app while typing
@@ -32,7 +34,7 @@
 <div class="veil" onclick={onclose}>
   <div class="picker" role="dialog" aria-label={title} tabindex="-1" onclick={(e) => e.stopPropagation()} {onkeydown}>
     <input bind:this={input} bind:value={filter} placeholder={title} aria-label={title} />
-    <ul role="listbox" aria-label="Folders">
+    <ul role="listbox" aria-label="Folders" bind:this={list}>
       {#each shown as f, i (f.name)}
         <li role="option" aria-selected={i === at}>
           <button class:at={i === at} onclick={() => onpick(f.name)} onmouseenter={() => (at = i)} onfocus={() => (at = i)}>{f.label}</button>

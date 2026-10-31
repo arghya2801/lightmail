@@ -78,7 +78,7 @@
     }
     return x.length - y.length
   }
-  let tree = $derived.by(() => {
+  let allTree = $derived.by(() => {
     const rows = []
     const seen = new Set()
     for (const f of synced.filter((f) => !f.role).sort((a, b) => cmpPath(a.name, b.name))) {
@@ -91,8 +91,9 @@
       }
     }
     for (const r of rows) r.kids = rows.some((o) => o.path.startsWith(r.path + '/'))
-    return rows.filter((r) => ![...collapsed].some((c) => r.path.startsWith(c + '/')))
+    return rows
   })
+  let tree = $derived(allTree.filter((r) => ![...collapsed].some((c) => r.path.startsWith(c + '/'))))
 
   let visibleSenders = $derived(
     // Empty filter: only the sender being viewed, so it can still be cleared.
@@ -466,13 +467,14 @@
     SetReaderZoom(readerZoom)
   }
 
-  // Folders in sidebar order, for g 1–9 and the Go to picker.
-  let sideOrder = $derived([
+  // Folders in sidebar order: shown ones for g 1–9, all of them for the Go to picker.
+  const order = (rows) => [
     ...system.map((f) => f.name),
     ...(system.some((f) => f.role === 'all') ? [] : ['']),
-    ...tree.filter((r) => r.folder).map((r) => r.path),
+    ...rows.filter((r) => r.folder).map((r) => r.path),
     ...bin.map((f) => f.name),
-  ])
+  ]
+  let sideOrder = $derived(order(tree))
 
   // Space pages through the open message, then moves to the next one.
   function page(d) {
@@ -739,7 +741,7 @@
 
   {#if picker}
     <Picker title={{ move: 'Move to', label: 'Add label', go: 'Go to' }[picker]}
-      folders={picker === 'go' ? sideOrder.map((name) => ({ name, label: name ? label(name) : 'All mail' }))
+      folders={picker === 'go' ? order(allTree).map((name) => ({ name, label: name ? label(name) : 'All mail' }))
         : picker === 'move' ? pickable : pickable.filter((f) => !byName[f.name]?.role)}
       onclose={() => (picker = null)} onpick={(name) => { const kind = picker; picker = null; kind === 'go' ? go(name) : act(kind, name) }} />
   {/if}
