@@ -477,6 +477,8 @@
       if (e.key === 'Escape') e.target.blur()
       return
     }
+    // Space presses a control reached with the keyboard; after a mouse click it still pages.
+    if (e.key === ' ' && e.target?.matches?.('button:focus-visible, a:focus-visible')) return
     if ((e.ctrlKey || e.metaKey) && e.key === 'a' && view === 'reader') {
       e.preventDefault()
       for (const m of items) selected.add(m.id)
