@@ -21,7 +21,8 @@ export namespace main {
 	export class Config {
 	    host: string;
 	    user: string;
-	    password: string;
+	    password?: string;
+	    passwordError?: string;
 	    labels: string[];
 	    saveDir: string;
 	    syncMinutes: number;
@@ -41,6 +42,7 @@ export namespace main {
 	        this.host = source["host"];
 	        this.user = source["user"];
 	        this.password = source["password"];
+	        this.passwordError = source["passwordError"];
 	        this.labels = source["labels"];
 	        this.saveDir = source["saveDir"];
 	        this.syncMinutes = source["syncMinutes"];
@@ -113,6 +115,9 @@ export namespace main {
 	    fromName: string;
 	    fromAddr: string;
 	    to: string;
+	    toAddrs?: string[];
+	    ccAddrs?: string[];
+	    hasAttachment: boolean;
 	    subject: string;
 	    date: number;
 	    read: boolean;
@@ -121,6 +126,7 @@ export namespace main {
 	    labels?: string[];
 	    attachments?: Attachment[];
 	    blocked?: number;
+	    imagesAllowed: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Msg(source);
@@ -132,6 +138,9 @@ export namespace main {
 	        this.fromName = source["fromName"];
 	        this.fromAddr = source["fromAddr"];
 	        this.to = source["to"];
+	        this.toAddrs = source["toAddrs"];
+	        this.ccAddrs = source["ccAddrs"];
+	        this.hasAttachment = source["hasAttachment"];
 	        this.subject = source["subject"];
 	        this.date = source["date"];
 	        this.read = source["read"];
@@ -140,6 +149,7 @@ export namespace main {
 	        this.labels = source["labels"];
 	        this.attachments = this.convertValues(source["attachments"], Attachment);
 	        this.blocked = source["blocked"];
+	        this.imagesAllowed = source["imagesAllowed"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

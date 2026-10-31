@@ -160,7 +160,9 @@ func (a *App) move(ids []int64, from, to string, copy bool) ([]Moved, error) {
 
 // Move takes messages out of from (the folder being viewed, or "" for each
 // message's own folder) and puts them in to.
-func (a *App) Move(ids []int64, from, to string) ([]Moved, error) { return a.move(ids, from, to, false) }
+func (a *App) Move(ids []int64, from, to string) ([]Moved, error) {
+	return a.move(ids, from, to, false)
+}
 
 // AddLabel files messages under to as well, leaving them where they are.
 func (a *App) AddLabel(ids []int64, to string) ([]Moved, error) { return a.move(ids, "", to, true) }

@@ -56,8 +56,8 @@ func TestPipeline(t *testing.T) {
 		t.Fatalf("text %q", m.Text)
 	}
 
-	out := rewrite(m.HTML, proxied)
-	for _, want := range []string{`src="/img?u=https%3A%2F%2Fcdn.x%2Fa.png"`, "Content-Security-Policy"} {
+	out := rewrite(m.HTML, proxied, true)
+	for _, want := range []string{`src="/img?u=https%3A%2F%2Fcdn.x%2Fa.png&amp;v=2"`, "Content-Security-Policy"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rewrite missing %s:\n%s", want, out)
 		}
@@ -101,6 +101,9 @@ func TestPipeline(t *testing.T) {
 }
 
 func TestFetchImageCaches(t *testing.T) {
+	old := httpc
+	httpc = &http.Client{Timeout: time.Second} // allow the test server only in this cache test
+	t.Cleanup(func() { httpc = old })
 	png := "\x89PNG\r\n\x1a\nfake"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(png)) }))
 	dir := t.TempDir()
@@ -423,7 +426,7 @@ func TestAttachments(t *testing.T) {
 		string(m.Attachments[0].data) != "%PDF-1.4" {
 		t.Errorf("attachments %+v", m.Attachments)
 	}
-	if out := rewrite(m.HTML, proxied); !strings.Contains(out, "data:image/png") {
+	if out := rewrite(m.HTML, proxied, true); !strings.Contains(out, "data:image/png") {
 		t.Errorf("rewrite dropped the inlined image: %s", out)
 	}
 }

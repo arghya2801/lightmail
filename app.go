@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -40,12 +41,16 @@ type App struct {
 	inboxChanged func() // what a change in the Inbox triggers; Sync, or a counter in tests
 }
 
-func NewApp(dir string, portable bool, store *Store) *App {
-	a := &App{dir: dir, store: store, cfg: loadConfig(dir, portable)}
+func NewApp(dir string, portable bool, store *Store) (*App, error) {
+	c, err := loadConfig(dir, portable)
+	if err != nil {
+		return nil, err
+	}
+	a := &App{dir: dir, store: store, cfg: c}
 	a.dial = func() (*imapclient.Client, error) { return dial(a.config(), clientOpts) }
 	a.dialIdle = func(o *imapclient.Options) (*imapclient.Client, error) { return dial(a.config(), o) }
 	a.inboxChanged = a.Sync
-	return a
+	return a, nil
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -86,11 +91,16 @@ func (a *App) SaveConfig(c Config) error {
 		c.Host = "imap.gmail.com:993"
 	}
 	a.mu.Lock()
+	c.PasswordError = ""
+	if err := saveConfig(a.dir, c); err != nil {
+		a.mu.Unlock()
+		return err
+	}
 	a.cfg = c
 	a.mu.Unlock()
 	a.dropConn() // the account may have changed
 	a.dropIdle()
-	return saveConfig(a.dir, c)
+	return nil
 }
 
 // SetAppearance saves only the display settings, so unsaved account edits stay unsaved.
@@ -103,18 +113,26 @@ func (a *App) SetAppearance(density, layout string, scale int) error {
 	}
 	scale = min(max(scale, 80), 150)
 	a.mu.Lock()
-	a.cfg.Density, a.cfg.Layout, a.cfg.Scale = density, layout, scale
+	defer a.mu.Unlock()
 	c := a.cfg
-	a.mu.Unlock()
-	return saveConfig(a.dir, c)
+	c.Density, c.Layout, c.Scale = density, layout, scale
+	if err := saveConfig(a.dir, c); err != nil {
+		return err
+	}
+	a.cfg = c
+	return nil
 }
 
 func (a *App) SetReaderZoom(zoom int) error {
 	a.mu.Lock()
-	a.cfg.ReaderZoom = min(max(zoom, 50), 200)
+	defer a.mu.Unlock()
 	c := a.cfg
-	a.mu.Unlock()
-	return saveConfig(a.dir, c)
+	c.ReaderZoom = min(max(zoom, 50), 200)
+	if err := saveConfig(a.dir, c); err != nil {
+		return err
+	}
+	a.cfg = c
+	return nil
 }
 
 type ServerFolder struct {
@@ -420,11 +438,13 @@ func (a *App) Open(id int64, images bool) (Msg, error) {
 	}
 	c := a.config()
 	src := proxied
-	if !images && c.BlockImages && !slices.Contains(c.ImageSenders, m.FromAddr) {
+	m.ImagesAllowed = images || !c.BlockImages || slices.Contains(c.ImageSenders, m.FromAddr)
+	if !m.ImagesAllowed {
 		src = func(string) string { m.Blocked++; return "" }
 	}
-	m.HTML = rewrite(p.HTML, src)
+	m.HTML = rewrite(p.HTML, src, m.ImagesAllowed)
 	m.Attachments = p.Attachments
+	m.ToAddrs, m.CcAddrs = p.ToAddrs, p.CcAddrs
 	if m.Labels, err = a.store.labelsOf(id); err != nil {
 		return m, err
 	}
@@ -438,12 +458,49 @@ func (a *App) Open(id int64, images bool) (Msg, error) {
 // AllowImages always loads remote images in mail from sender.
 func (a *App) AllowImages(sender string) error {
 	a.mu.Lock()
-	if !slices.Contains(a.cfg.ImageSenders, sender) {
-		a.cfg.ImageSenders = append(a.cfg.ImageSenders, sender)
-	}
+	defer a.mu.Unlock()
 	c := a.cfg
-	a.mu.Unlock()
-	return saveConfig(a.dir, c)
+	if !slices.Contains(c.ImageSenders, sender) {
+		c.ImageSenders = append(slices.Clone(c.ImageSenders), sender)
+	}
+	if err := saveConfig(a.dir, c); err != nil {
+		return err
+	}
+	a.cfg = c
+	return nil
+}
+
+func externalURL(raw string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", err
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+		if u.Hostname() == "" {
+			return "", errors.New("link has no host")
+		}
+	case "mailto":
+		if u.Opaque == "" {
+			return "", errors.New("mail link has no address")
+		}
+	default:
+		return "", errors.New("only web and mail links can be opened")
+	}
+	return u.String(), nil
+}
+
+// ShellExecute passes the URL directly to its handler without a command shell.
+func (a *App) OpenLink(raw string) error {
+	u, err := externalURL(raw)
+	if err != nil {
+		return err
+	}
+	p, err := windows.UTF16PtrFromString(u)
+	if err != nil {
+		return err
+	}
+	return windows.ShellExecute(0, nil, p, nil, nil, windows.SW_SHOWNORMAL)
 }
 
 func (a *App) attachment(id int64, i int) (Attachment, error) {
@@ -525,7 +582,7 @@ func (a *App) OpenAttachment(id int64, i int) error {
 	return windows.ShellExecute(0, nil, p, nil, nil, windows.SW_SHOWNORMAL)
 }
 
-func (a *App) SaveEmail(id int64) (string, error) {
+func (a *App) SaveEmail(id int64, images bool) (string, error) {
 	m, err := a.store.Get(id)
 	if err != nil {
 		return "", err
@@ -539,5 +596,6 @@ func (a *App) SaveEmail(id int64) (string, error) {
 		return "", err
 	}
 	m.HTML = p.HTML
-	return saveEmail(a.dir, a.saveDir(), m)
+	c := a.config()
+	return saveEmail(a.dir, a.saveDir(), m, images || !c.BlockImages || slices.Contains(c.ImageSenders, m.FromAddr))
 }

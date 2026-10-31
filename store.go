@@ -17,16 +17,18 @@ import (
 )
 
 type Config struct {
-	Host        string   `json:"host"`
-	User        string   `json:"user"`
-	Password    string   `json:"password"`
-	Labels      []string `json:"labels"` // folders to sync
-	SaveDir     string   `json:"saveDir"`
-	SyncMinutes int      `json:"syncMinutes"`
-	Density     string   `json:"density"`    // "comfortable" or "compact"
-	Layout      string   `json:"layout"`     // "cards" (list beside the message) or "table" (columns above it)
-	Scale       int      `json:"scale"`      // interface size in percent
-	ReaderZoom  int      `json:"readerZoom"` // message body zoom in percent
+	Host           string `json:"host"`
+	User           string `json:"user"`
+	Password       string `json:"password,omitempty"`
+	PasswordError  string `json:"passwordError,omitempty"`
+	passwordCipher string
+	Labels         []string `json:"labels"` // folders to sync
+	SaveDir        string   `json:"saveDir"`
+	SyncMinutes    int      `json:"syncMinutes"`
+	Density        string   `json:"density"`    // "comfortable" or "compact"
+	Layout         string   `json:"layout"`     // "cards" (list beside the message) or "table" (columns above it)
+	Scale          int      `json:"scale"`      // interface size in percent
+	ReaderZoom     int      `json:"readerZoom"` // message body zoom in percent
 	// Remote images are tracking beacons as often as pictures. With BlockImages
 	// set they load only for senders on this list, or when asked.
 	BlockImages  bool     `json:"blockImages"`
@@ -55,15 +57,33 @@ func dataDir() (dir string, portable bool) {
 	return dir, portable
 }
 
-func loadConfig(dir string, portable bool) Config {
+func loadConfig(dir string, portable bool) (Config, error) {
 	home, _ := os.UserHomeDir()
 	save := filepath.Join(home, "Documents", "Lightmail")
 	if portable {
 		save = "Saved" // relative to the data folder, so it survives a new drive letter
 	}
 	c := Config{Host: "imap.gmail.com:993", SaveDir: save, SyncMinutes: 15, Density: "comfortable", Layout: "cards", Scale: 100, ReaderZoom: 100}
+	var disk struct {
+		*Config
+		ProtectedPassword string `json:"protectedPassword,omitempty"`
+	}
+	disk.Config = &c
 	if b, err := os.ReadFile(filepath.Join(dir, "config.json")); err == nil {
-		json.Unmarshal(b, &c)
+		if err := json.Unmarshal(b, &disk); err != nil {
+			return c, fmt.Errorf("read settings: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return c, err
+	}
+	c.passwordCipher = disk.ProtectedPassword
+	hadPlainPassword := c.Password != ""
+	if c.Password == "" && c.passwordCipher != "" {
+		var err error
+		c.Password, err = unprotectPassword(c.passwordCipher)
+		if err != nil {
+			c.PasswordError = "The saved password cannot be unlocked by this Windows account. Enter your app password again."
+		}
 	}
 	if b, err := os.ReadFile(filepath.Join(filepath.Dir(dir), "newsletter-reader", "config.json")); err == nil && c.User == "" {
 		// Not signed in yet beside the Newsletters app: reuse its sign-in, not its folders.
@@ -72,12 +92,48 @@ func loadConfig(dir string, portable bool) Config {
 			c.Host, c.User, c.Password = cmp.Or(old.Host, c.Host), old.User, old.Password
 		}
 	}
-	return c
+	if c.Password != "" && (hadPlainPassword || c.passwordCipher == "") {
+		if err := saveConfig(dir, c); err != nil {
+			return c, fmt.Errorf("protect saved password: %w", err)
+		}
+	}
+	return c, nil
 }
 
 func saveConfig(dir string, c Config) error {
-	b, _ := json.MarshalIndent(c, "", "  ")
-	return os.WriteFile(filepath.Join(dir, "config.json"), b, 0o600)
+	cipher := c.passwordCipher
+	if c.Password != "" {
+		var err error
+		cipher, err = protectPassword(c.Password)
+		if err != nil {
+			return fmt.Errorf("protect password: %w", err)
+		}
+	}
+	c.Password, c.PasswordError = "", ""
+	b, err := json.MarshalIndent(struct {
+		Config
+		ProtectedPassword string `json:"protectedPassword,omitempty"`
+	}{c, cipher}, "", "  ")
+	if err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, ".config-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err = f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), filepath.Join(dir, "config.json"))
 }
 
 // messages holds only header metadata, so listing a 50k-message folder scans
@@ -90,7 +146,8 @@ PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS messages(
   id INTEGER PRIMARY KEY, message_id TEXT UNIQUE NOT NULL,
   from_name TEXT NOT NULL, from_addr TEXT NOT NULL, to_addrs TEXT NOT NULL, subject TEXT NOT NULL,
-  date INTEGER NOT NULL, size INTEGER NOT NULL, read INTEGER NOT NULL DEFAULT 0, flagged INTEGER NOT NULL DEFAULT 0);
+  date INTEGER NOT NULL, size INTEGER NOT NULL, read INTEGER NOT NULL DEFAULT 0, flagged INTEGER NOT NULL DEFAULT 0,
+  to_recipients TEXT NOT NULL DEFAULT '[]', cc_recipients TEXT NOT NULL DEFAULT '[]', has_attachment INTEGER NOT NULL DEFAULT -1);
 CREATE INDEX IF NOT EXISTS messages_date ON messages(date);
 CREATE TABLE IF NOT EXISTS bodies(id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE, raw BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS message_labels(
@@ -99,7 +156,7 @@ CREATE TABLE IF NOT EXISTS message_labels(
 CREATE INDEX IF NOT EXISTS message_labels_uid ON message_labels(label, uid);
 CREATE TABLE IF NOT EXISTS label_state(label TEXT PRIMARY KEY, uidvalidity INTEGER NOT NULL, last_uid INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS folders(name TEXT PRIMARY KEY, role TEXT NOT NULL);
-CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(subject, from_name, text, content='', contentless_delete=1);
+CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(subject, from_name, from_addr, text, content='', contentless_delete=1);
 CREATE TABLE IF NOT EXISTS pending_flags(
   message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE, flag TEXT NOT NULL, value INTEGER NOT NULL,
   PRIMARY KEY(message_id, flag));
@@ -137,9 +194,8 @@ func (s *Store) changedSince(id int64, mark uint64) bool {
 	return s.touched[id] > mark
 }
 
-// schemaVersion goes up whenever schema changes shape. The cache holds
-// nothing the server doesn't, so an old one is deleted and synced again.
-const schemaVersion = 2
+// Version 2 migrates in place; older incompatible caches are rebuilt.
+const schemaVersion = 3
 
 func openStore(path string) (*Store, error) {
 	// WAL lets the list read while a sync writes. Pragmas are per connection, so
@@ -152,6 +208,13 @@ func openStore(path string) (*Store, error) {
 	var v, tables int
 	db.QueryRow(`PRAGMA user_version`).Scan(&v)
 	db.QueryRow(`SELECT count(*) FROM sqlite_master`).Scan(&tables)
+	if v == 2 {
+		if err := migrateMetadata(db); err != nil {
+			db.Close()
+			return nil, err
+		}
+		v = schemaVersion
+	}
 	if v != schemaVersion && tables > 0 {
 		db.Close()
 		for _, suffix := range []string{"", "-wal", "-shm"} {
@@ -165,6 +228,65 @@ func openStore(path string) (*Store, error) {
 		return nil, err
 	}
 	return &Store{db: db, touched: map[int64]uint64{}}, nil
+}
+
+// Keep cached bodies and pending mailbox changes while rebuilding the search index.
+func migrateMetadata(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`ALTER TABLE messages ADD COLUMN to_recipients TEXT NOT NULL DEFAULT '[]';
+		ALTER TABLE messages ADD COLUMN cc_recipients TEXT NOT NULL DEFAULT '[]';
+		ALTER TABLE messages ADD COLUMN has_attachment INTEGER NOT NULL DEFAULT -1;
+		DROP TABLE fts;
+		CREATE VIRTUAL TABLE fts USING fts5(subject, from_name, from_addr, text, content='', contentless_delete=1);`); err != nil {
+		return err
+	}
+	rows, err := tx.Query(`SELECT m.id,m.subject,m.from_name,m.from_addr,b.raw FROM messages m LEFT JOIN bodies b ON b.id=m.id`)
+	if err != nil {
+		return err
+	}
+	type entry struct {
+		id                     int64
+		subject, name, address string
+		raw                    []byte
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var e entry
+		if err := rows.Scan(&e.id, &e.subject, &e.name, &e.address, &e.raw); err != nil {
+			rows.Close()
+			return err
+		}
+		text := ""
+		if e.raw != nil {
+			raw, unpackErr := unpack(e.raw)
+			m, parseErr := parseMsg(raw)
+			if unpackErr == nil && parseErr == nil {
+				text = m.Text
+				to, _ := json.Marshal(m.ToAddrs)
+				cc, _ := json.Marshal(m.CcAddrs)
+				if _, err := tx.Exec(`UPDATE messages SET to_recipients=?,cc_recipients=?,has_attachment=? WHERE id=?`, string(to), string(cc), len(m.Attachments) > 0, e.id); err != nil {
+					return err
+				}
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO fts(rowid,subject,from_name,from_addr,text) VALUES(?,?,?,?,?)`, e.id, e.subject, e.name, e.address, text); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version=%d", schemaVersion)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 var packers = sync.Pool{New: func() any { w, _ := flate.NewWriter(nil, flate.DefaultCompression); return w }}
@@ -186,21 +308,25 @@ func unpack(b []byte) ([]byte, error) {
 }
 
 type Msg struct {
-	ID          int64        `json:"id"`
-	MessageID   string       `json:"-"`
-	FromName    string       `json:"fromName"`
-	FromAddr    string       `json:"fromAddr"`
-	To          string       `json:"to"` // display names of To and Cc, comma-separated
-	Subject     string       `json:"subject"`
-	Date        int64        `json:"date"`
-	Size        int64        `json:"-"`
-	Read        bool         `json:"read"`
-	Flagged     bool         `json:"flagged"`
-	HTML        string       `json:"html,omitempty"`
-	Text        string       `json:"-"`
-	Labels      []string     `json:"labels,omitempty"`      // filled by Open
-	Attachments []Attachment `json:"attachments,omitempty"` // filled by Open
-	Blocked     int          `json:"blocked,omitempty"`     // remote images held back by Open
+	ID            int64        `json:"id"`
+	MessageID     string       `json:"-"`
+	FromName      string       `json:"fromName"`
+	FromAddr      string       `json:"fromAddr"`
+	To            string       `json:"to"` // display names of To and Cc, comma-separated
+	ToAddrs       []string     `json:"toAddrs,omitempty"`
+	CcAddrs       []string     `json:"ccAddrs,omitempty"`
+	HasAttachment bool         `json:"hasAttachment"`
+	Subject       string       `json:"subject"`
+	Date          int64        `json:"date"`
+	Size          int64        `json:"-"`
+	Read          bool         `json:"read"`
+	Flagged       bool         `json:"flagged"`
+	HTML          string       `json:"html,omitempty"`
+	Text          string       `json:"-"`
+	Labels        []string     `json:"labels,omitempty"`      // filled by Open
+	Attachments   []Attachment `json:"attachments,omitempty"` // filled by Open
+	Blocked       int          `json:"blocked,omitempty"`     // remote images held back by Open
+	ImagesAllowed bool         `json:"imagesAllowed"`
 }
 
 type Folder struct {
@@ -213,19 +339,24 @@ type Folder struct {
 
 // insertHeader adds m (deduped by Message-ID) and records it at uid in label.
 func insertHeader(tx *sql.Tx, m *Msg, label string, uid uint32) error {
-	res, err := tx.Exec(`INSERT INTO messages(message_id,from_name,from_addr,to_addrs,subject,date,size,read,flagged)
-		VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(message_id) DO NOTHING`,
-		m.MessageID, m.FromName, m.FromAddr, m.To, m.Subject, m.Date, m.Size, m.Read, m.Flagged)
+	to, _ := json.Marshal(m.ToAddrs)
+	cc, _ := json.Marshal(m.CcAddrs)
+	res, err := tx.Exec(`INSERT INTO messages(message_id,from_name,from_addr,to_addrs,subject,date,size,read,flagged,to_recipients,cc_recipients,has_attachment)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(message_id) DO NOTHING`,
+		m.MessageID, m.FromName, m.FromAddr, m.To, m.Subject, m.Date, m.Size, m.Read, m.Flagged, string(to), string(cc), m.HasAttachment)
 	if err != nil {
 		return err
 	}
 	var id int64
 	if n, _ := res.RowsAffected(); n == 1 {
 		id, _ = res.LastInsertId()
-		if _, err := tx.Exec(`INSERT INTO fts(rowid,subject,from_name,text) VALUES(?,?,?,'')`, id, m.Subject, m.FromName); err != nil {
+		if _, err := tx.Exec(`INSERT INTO fts(rowid,subject,from_name,from_addr,text) VALUES(?,?,?,?,'')`, id, m.Subject, m.FromName, m.FromAddr); err != nil {
 			return err
 		}
 	} else if err := tx.QueryRow(`SELECT id FROM messages WHERE message_id=?`, m.MessageID).Scan(&id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE messages SET to_recipients=?,cc_recipients=?,has_attachment=? WHERE id=?`, string(to), string(cc), m.HasAttachment, id); err != nil {
 		return err
 	}
 	_, err = tx.Exec(`INSERT INTO message_labels VALUES(?,?,?) ON CONFLICT(message_id,label) DO UPDATE SET uid=excluded.uid`, id, label, uid)
@@ -235,16 +366,19 @@ func insertHeader(tx *sql.Tx, m *Msg, label string, uid uint32) error {
 // setBody caches the raw message found at uid in label and indexes its text.
 func (s *Store) setBody(label string, uid uint32, raw []byte) (int64, error) {
 	var id int64
-	var subject, from string
-	err := s.db.QueryRow(`SELECT m.id,m.subject,m.from_name FROM message_labels l JOIN messages m ON m.id=l.message_id
-		WHERE l.label=? AND l.uid=?`, label, uid).Scan(&id, &subject, &from)
+	var subject, from, address string
+	err := s.db.QueryRow(`SELECT m.id,m.subject,m.from_name,m.from_addr FROM message_labels l JOIN messages m ON m.id=l.message_id
+		WHERE l.label=? AND l.uid=?`, label, uid).Scan(&id, &subject, &from, &address)
 	if err != nil {
 		return 0, err
 	}
-	text := ""
-	if m, err := parseMsg(raw); err == nil {
-		text = m.Text
-	}
+	m, err := parseMsg(raw)
+	parsed := err == nil
+	if err != nil {
+		m = &Msg{}
+	} // keep raw mail even when its MIME headers cannot be parsed
+	to, _ := json.Marshal(m.ToAddrs)
+	cc, _ := json.Marshal(m.CcAddrs)
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
@@ -256,9 +390,14 @@ func (s *Store) setBody(label string, uid uint32, raw []byte) (int64, error) {
 	}{
 		{`INSERT OR REPLACE INTO bodies VALUES(?,?)`, []any{id, pack(raw)}},
 		{`DELETE FROM fts WHERE rowid=?`, []any{id}},
-		{`INSERT INTO fts(rowid,subject,from_name,text) VALUES(?,?,?,?)`, []any{id, subject, from, text}},
+		{`INSERT INTO fts(rowid,subject,from_name,from_addr,text) VALUES(?,?,?,?,?)`, []any{id, subject, from, address, m.Text}},
 	} {
 		if _, err := tx.Exec(q.sql, q.args...); err != nil {
+			return 0, err
+		}
+	}
+	if parsed {
+		if _, err := tx.Exec(`UPDATE messages SET to_recipients=?,cc_recipients=?,has_attachment=? WHERE id=?`, string(to), string(cc), len(m.Attachments) > 0, id); err != nil {
 			return 0, err
 		}
 	}
@@ -426,10 +565,17 @@ func where(label, sender, search string) (string, []any) {
 
 const pageSize = 100
 
-const msgCols = `m.id,m.from_name,m.from_addr,m.to_addrs,m.subject,m.date,m.read,m.flagged`
+const msgCols = `m.id,m.from_name,m.from_addr,m.to_addrs,m.subject,m.date,m.read,m.flagged,m.to_recipients,m.cc_recipients,m.has_attachment>0`
 
 func scanMsg(row interface{ Scan(...any) error }, m *Msg) error {
-	return row.Scan(&m.ID, &m.FromName, &m.FromAddr, &m.To, &m.Subject, &m.Date, &m.Read, &m.Flagged)
+	var to, cc string
+	if err := row.Scan(&m.ID, &m.FromName, &m.FromAddr, &m.To, &m.Subject, &m.Date, &m.Read, &m.Flagged, &to, &cc, &m.HasAttachment); err != nil {
+		return err
+	}
+	if err := json.Unmarshal([]byte(to), &m.ToAddrs); err != nil {
+		return err
+	}
+	return json.Unmarshal([]byte(cc), &m.CcAddrs)
 }
 
 func (s *Store) List(q Query) ([]Msg, error) {

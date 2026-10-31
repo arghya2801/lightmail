@@ -11,6 +11,7 @@
   import Picker from './Picker.svelte'
   import Settings, { zooms } from './Settings.svelte'
   import { resize } from './resize.js'
+  import { selectMessage } from './selection.js'
 
   let view = $state('reader') // reader | settings
   let q = $state({ label: '', sender: '', search: '', sort: stored('sort', 'date:desc') })
@@ -118,15 +119,16 @@
     if (reset && !keepScroll && listEl) listEl.scrollTop = 0
   }
 
-  let chosen = false // picked the Inbox on first load
+  let chosen = false
   async function counts() {
     folders = (await Folders()) ?? []
     const unread = folders.find((f) => f.role === 'inbox')?.unread
     WindowSetTitle(unread ? `(${unread}) Lightmail` : 'Lightmail') // shows on the taskbar
     if (!chosen && folders.length) {
       chosen = true
-      const inbox = synced.find((f) => f.role === 'inbox')
-      if (inbox && !q.label) q.label = inbox.name
+      const last = stored('lastFolder', '')
+      const folder = synced.find((f) => f.name === last) ?? synced.find((f) => f.role === 'inbox') ?? synced[0]
+      if (folder && !q.label) q.label = folder.name
     }
     senders = (await Senders(from)) ?? []
   }
@@ -138,6 +140,7 @@
     untrack(() => {
       selected.clear() // rows the new filter hides mustn't stay picked
       anchor = null
+      if (label) try { localStorage.setItem('lastFolder', JSON.stringify(label)) } catch {}
     })
     clearTimeout(timer)
     timer = setTimeout(() => load(true), search ? 200 : 0)
@@ -219,22 +222,17 @@
 
   // Click opens; Ctrl+click toggles one row; Shift+click selects a range.
   function pick(m, e) {
-    if (e.shiftKey && anchor != null) {
-      const a = items.findIndex((x) => x.id === anchor), b = items.findIndex((x) => x.id === m.id)
-      for (const x of items.slice(Math.min(a, b), Math.max(a, b) + 1)) selected.add(x.id)
-      return
-    }
-    if (e.ctrlKey || e.metaKey) {
-      if (!selected.size && msg) selected.add(msg.id)
-      return toggle(m)
-    }
+    const result = selectMessage(items, selected, anchor, msg?.id, m, e)
+    anchor = result.anchor
+    if (result.open) open(m)
+  }
+  function toggle(m, e = {}) {
+    anchor = selectMessage(items, selected, anchor, msg?.id, m, e, true).anchor
+  }
+  function openRow(m) {
     selected.clear()
     anchor = m.id
     open(m)
-  }
-  function toggle(m) {
-    selected.has(m.id) ? selected.delete(m.id) : selected.add(m.id)
-    anchor = m.id
   }
 
   // What an action applies to: the selection, else the open message.
@@ -335,7 +333,7 @@
   async function save() {
     if (!msg) return
     try {
-      flash('Saved to ' + (await SaveEmail(msg.id)))
+      flash('Saved to ' + (await SaveEmail(msg.id, !!msg.imagesAllowed)))
     } catch (e) {
       fail("Couldn't save. " + e)
     }
@@ -344,7 +342,11 @@
   async function loadImages(always) {
     try {
       const id = msg.id
-      if (always) await AllowImages(msg.fromAddr)
+      const sender = msg.fromAddr
+      if (always) {
+        await AllowImages(sender)
+        flash('Images will always load for ' + sender + '. Remove the sender in Settings to undo this.')
+      }
       const full = await Open(id, true)
       if (msg?.id === id) msg = full // unless another message was opened meanwhile
     } catch (e) {
@@ -706,7 +708,7 @@
           <span class="n" title="Messages loaded">{items.length}{more ? '+' : ''}</span>
         </div>
       {/if}
-      <MailList {items} {selected} current={msg?.id} bind:el={listEl} onpick={pick} ontoggle={toggle} onstar={star} ondragstart={dragstart}
+      <MailList {items} {selected} current={msg?.id} bind:el={listEl} onpick={pick} onopen={openRow} ontoggle={toggle} onstar={star} ondragstart={dragstart}
         table={look.layout === 'table'} sort={q.sort} onsort={(s) => { q.sort = s; localStorage.setItem('sort', JSON.stringify(s)) }}
         onmore={() => more && ((more = false), load(false))}>
         {#snippet empty()}
@@ -734,7 +736,7 @@
     {:else if msg}
       {#key `${msg.id}:${msg.blocked}:${msg.loading}`}
         <Reader {msg} {onkey} zoom={readerZoom} onzoom={zoomReader}
-          {actions} onsave={save} onattach={attachment} onimages={loadImages}
+          {actions} onsave={save} onattach={attachment} onimages={loadImages} onerror={fail}
           chips={(msg.labels ?? []).filter((l) => l !== from).map(label)} />
       {/key}
     {:else}

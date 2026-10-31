@@ -21,7 +21,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	app := NewApp(dir, portable, store)
+	app, err := NewApp(dir, portable, store)
+	if err != nil {
+		log.Fatal(err)
+	}
 	win := &windows.Options{}
 	// No GPU process: about 70 MB less memory (246 to 176 MB private, measured) for
 	// roughly 20% more renderer CPU while moving between messages. Text mail doesn't need it.
@@ -30,8 +33,27 @@ func main() {
 		win.WebviewUserDataPath = filepath.Join(dir, "webview")
 	}
 
-	// /img?u=<remote url> serves newsletter images from the disk cache.
-	imgs := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	err = wails.Run(&options.App{
+		Title:            "Lightmail",
+		Width:            1320,
+		Height:           860,
+		MinWidth:         900,
+		MinHeight:        560,
+		AssetServer:      &assetserver.Options{Assets: assets, Handler: imageHandler(dir)},
+		BackgroundColour: &options.RGBA{R: 230, G: 233, B: 237, A: 1},
+		OnStartup:        app.startup,
+		Windows:          win,
+		Bind:             []interface{}{app},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+// /img?u=<remote url> serves validated images from the disk cache.
+func imageHandler(dir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		if r.URL.Path != "/img" {
 			http.NotFound(w, r)
 			return
@@ -44,21 +66,5 @@ func main() {
 		w.Header().Set("Content-Type", ct)
 		w.Header().Set("Cache-Control", "max-age=31536000")
 		w.Write(b)
-	})
-
-	err = wails.Run(&options.App{
-		Title:            "Lightmail",
-		Width:            1320,
-		Height:           860,
-		MinWidth:         900,
-		MinHeight:        560,
-		AssetServer:      &assetserver.Options{Assets: assets, Handler: imgs},
-		BackgroundColour: &options.RGBA{R: 230, G: 233, B: 237, A: 1},
-		OnStartup:        app.startup,
-		Windows:          win,
-		Bind:             []interface{}{app},
-	})
-	if err != nil {
-		log.Fatal(err)
 	}
 }

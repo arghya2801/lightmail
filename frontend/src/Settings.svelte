@@ -89,6 +89,7 @@
         (needs 2-step verification). IMAP must be on in Gmail settings.
       </span>
     </label>
+    {#if cfg.passwordError}<p class="error" role="alert">{cfg.passwordError}</p>{/if}
 
     <fieldset>
       <legend>Labels to sync</legend>
@@ -111,6 +112,15 @@
       Hide remote images until I ask
     </label>
     <span class="hint muted check-hint">Remote images can tell the sender when you opened a message. When they're hidden, click Load images in a message, or allow a sender for good.</span>
+    {#if cfg.imageSenders?.length}
+      <fieldset>
+        <legend>Always load images from</legend>
+        {#each cfg.imageSenders as sender}
+          <div class="allowed-sender"><span>{sender}</span><button type="button" aria-label="Remove {sender} from allowed image senders" onclick={() => (cfg.imageSenders = cfg.imageSenders.filter((s) => s !== sender))}>Remove</button></div>
+        {/each}
+        <span class="hint muted">Save and sync applies removals. Removed senders follow the image setting above.</span>
+      </fieldset>
+    {/if}
 
     <label>
       Save folder
@@ -179,6 +189,7 @@
   .dir input:first-child:not(.mins) { flex: 1; }
   .mins { width: 80px; }
   .error { color: var(--warn); }
+  .allowed-sender { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; overflow-wrap: anywhere; }
   button { border: 1px solid var(--rule); }
   .primary { background: var(--ink); color: var(--paper); border-color: var(--ink); padding: 6px 14px; }
   .primary:hover { background: var(--ink); opacity: 0.9; }

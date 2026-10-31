@@ -1,12 +1,43 @@
 <script>
   import { slide } from 'svelte/transition'
   import { resize } from './resize.js'
+  import { adjacentMessage } from './selection.js'
 
   // selected is a SvelteSet of ids owned by App; current is the open message's id.
   // sort is "col:dir,..." in priority order. The headings set it: click sorts by that
   // column alone (again flips it), Shift+click adds it as the next level, then flips, then drops it.
   // table lines the headings up as columns over the rows.
-  let { items, selected, current, onpick, ontoggle, onstar, ondragstart, onmore, el = $bindable(), empty, table, sort, onsort } = $props()
+  let { items, selected, current, onpick, onopen, ontoggle, onstar, ondragstart, onmore, el = $bindable(), empty, table, sort, onsort } = $props()
+  let focused = $state(null)
+  let focusId = $derived(items.some((m) => m.id === focused) ? focused : items.some((m) => m.id === current) ? current : items[0]?.id)
+
+  function rowkey(e, m) {
+    const row = e.currentTarget
+    if (['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) {
+      e.preventDefault()
+      e.stopPropagation()
+      const next = adjacentMessage(items, m.id, e.key)
+      if (!next) return
+      focused = next.id
+      if (e.shiftKey) {
+        if (!selected.size) ontoggle(m)
+        onpick(next, e)
+      }
+      const target = el.querySelector(`[data-id="${next.id}"]`)
+      target?.focus()
+      target?.scrollIntoView({ block: 'nearest' })
+      if (next === items.at(-1)) onmore()
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault()
+      e.stopPropagation()
+      const stops = [row, ...row.querySelectorAll('input, button')]
+      stops[Math.max(0, Math.min(stops.length - 1, stops.indexOf(e.target) + (e.key === 'ArrowRight' ? 1 : -1)))].focus()
+    } else if (e.target === row && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault()
+      e.stopPropagation()
+      e.key === 'Enter' ? onopen(m) : ontoggle(m, e)
+    }
+  }
 
   const year = new Date().getFullYear()
   const fmtDate = (s) => {
@@ -64,19 +95,21 @@
   </div>
 </div>
 
-<div class="items" class:table class:selecting={selected.size > 0} bind:this={el} {onscroll} role="listbox" aria-multiselectable="true" aria-label="Messages">
+<div class="items" class:table class:selecting={selected.size > 0} bind:this={el} {onscroll} role="grid" aria-multiselectable="true" aria-label="Messages" aria-colcount="5">
   {#each items as m (m.id)}
     <div class="item" class:unread={!m.read} class:open={current === m.id} class:picked={selected.has(m.id)}
-      data-id={m.id} role="option" aria-selected={selected.has(m.id) || current === m.id} tabindex="-1" draggable="true"
-      onclick={(e) => onpick(m, e)} onkeydown={(e) => e.key === 'Enter' && onpick(m, e)} ondragstart={(e) => ondragstart(e, m)}
+      data-id={m.id} role="row" aria-selected={selected.has(m.id)} aria-current={current === m.id ? 'true' : undefined}
+      aria-label="{m.read ? 'Read' : 'Unread'}, {m.fromName || m.fromAddr}, {m.subject || '(no subject)'}"
+      tabindex={focusId === m.id ? 0 : -1} draggable="true"
+      onfocusin={() => (focused = m.id)} onclick={(e) => onpick(m, e)} ondblclick={(e) => { if (!e.target.closest('input, button')) onopen(m) }} onkeydown={(e) => rowkey(e, m)} ondragstart={(e) => ondragstart(e, m)}
       out:slide={{ duration: out }}>
-      <input type="checkbox" class="pick" checked={selected.has(m.id)} aria-label="Select"
-        onclick={(e) => { e.stopPropagation(); ontoggle(m) }} />
-      <button class="star" class:on={m.flagged} aria-label={m.flagged ? 'Unstar' : 'Star'} title="{m.flagged ? 'Unstar' : 'Star'} (s)"
-        onclick={(e) => { e.stopPropagation(); onstar(m) }}>{m.flagged ? '★' : '☆'}</button>
-      <span class="from" title={m.fromAddr}>{m.fromName || m.fromAddr || '(unknown sender)'}</span>
-      <span class="date" title={full(m.date)}>{fmtDate(m.date)}</span>
-      <span class="subj">{m.subject || '(no subject)'}</span>
+      <span role="gridcell" class="pick"><input type="checkbox" tabindex="-1" checked={selected.has(m.id)} aria-label="Select {m.subject || 'message'}"
+        onclick={(e) => { e.stopPropagation(); ontoggle(m, e) }} /></span>
+      <span role="gridcell" class="star"><button class="star-button" tabindex="-1" class:on={m.flagged} aria-label={m.flagged ? 'Unstar' : 'Star'} title="{m.flagged ? 'Unstar' : 'Star'} (s)"
+        onclick={(e) => { e.stopPropagation(); onstar(m) }}>{m.flagged ? '★' : '☆'}</button></span>
+      <span role="gridcell" class="from" title={m.fromAddr}>{m.fromName || m.fromAddr || '(unknown sender)'}</span>
+      <span role="gridcell" class="date" title={full(m.date)}>{fmtDate(m.date)}</span>
+      <span role="gridcell" class="subj">{#if m.hasAttachment}<svg class="attachment" viewBox="0 0 16 16" width="13" height="13" role="img" aria-label="Has attachments"><path d="m5 9 5-5a2 2 0 0 1 3 3l-7 7a3 3 0 0 1-4-4l7-7" fill="none" stroke="currentColor" stroke-width="1.4" /></svg> {/if}{m.subject || '(no subject)'}</span>
     </div>
   {:else}
     <p class="empty muted">{@render empty()}</p>
@@ -125,15 +158,17 @@
   .head .on { color: var(--ink); font-weight: 600; }
   .head .date, .items.table .date { text-align: right; }
   .item:hover { background: color-mix(in srgb, var(--paper) 50%, var(--chrome)); }
-  .item:focus-visible { outline: none; } /* j/k and the open highlight show where you are */
+  .item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .item.open { background: var(--paper); }
   .item.picked { background: var(--picked); border-left-color: var(--focus); }
 
-  .pick { grid-area: pick; margin: 0; opacity: 0; } /* not visibility: it must stay reachable by Tab */
-  .item:hover .pick, .selecting .pick, .pick:focus-visible { opacity: 1; }
-  .star { grid-area: star; padding: 0 2px; line-height: 1; color: var(--muted); opacity: 0.5; }
-  .star:hover { background: none; opacity: 1; }
-  .star.on { color: var(--star); opacity: 1; }
+  .pick { grid-area: pick; margin: 0; opacity: 0; }
+  .pick input { margin: 0; }
+  .item:hover .pick, .selecting .pick, .item:focus-within .pick { opacity: 1; }
+  .star { grid-area: star; }
+  .star-button { padding: 0 2px; line-height: 1; color: var(--muted); opacity: 0.5; }
+  .star-button:hover { background: none; opacity: 1; }
+  .star-button.on { color: var(--star); opacity: 1; }
 
   .from, .subj { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .from { grid-area: from; color: var(--muted); }

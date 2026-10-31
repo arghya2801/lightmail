@@ -9,12 +9,16 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"net/http"
+	netmail "net/mail"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/emersion/go-imap/v2"
@@ -154,6 +158,7 @@ func (s *Store) syncLabel(ss *session, label string, progress func(int)) error {
 	if sel.NumMessages > 0 && (sel.UIDNext == 0 || uint32(sel.UIDNext) > last+1) {
 		cmd := ss.cl.Fetch(imap.UIDSet{{Start: imap.UID(last + 1), Stop: 0}}, &imap.FetchOptions{
 			UID: true, Flags: true, Envelope: true, RFC822Size: true, InternalDate: true,
+			BodyStructure: &imap.FetchItemBodyStructure{Extended: true},
 		})
 		defer cmd.Close()
 		n := 0
@@ -182,6 +187,46 @@ func (s *Store) syncLabel(ss *session, label string, progress func(int)) error {
 	if err := save(); err != nil {
 		return err
 	}
+	// Older caches already know the UIDs, but not the attachment or recipient metadata.
+	rows, err := s.db.Query(`SELECT l.uid FROM message_labels l JOIN messages m ON m.id=l.message_id WHERE l.label=? AND m.has_attachment=-1`, label)
+	if err != nil {
+		return err
+	}
+	var missing []imap.UID
+	for rows.Next() {
+		var uid imap.UID
+		if err := rows.Scan(&uid); err != nil {
+			rows.Close()
+			return err
+		}
+		missing = append(missing, uid)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for start := 0; start < len(missing); start += batch {
+		cmd := ss.cl.Fetch(imap.UIDSetNum(missing[start:min(start+batch, len(missing))]...), &imap.FetchOptions{
+			UID: true, Flags: true, Envelope: true, RFC822Size: true, InternalDate: true, BodyStructure: &imap.FetchItemBodyStructure{Extended: true},
+		})
+		for fm := cmd.Next(); fm != nil; fm = cmd.Next() {
+			buf, err := fm.Collect()
+			if err != nil {
+				cmd.Close()
+				return err
+			}
+			if buf.Envelope != nil {
+				got = append(got, hdr{envMsg(buf), uint32(buf.UID)})
+			}
+		}
+		if err := cmd.Close(); err != nil {
+			return err
+		}
+		if err := save(); err != nil {
+			return err
+		}
+	}
 	return s.reconcile(ss.cl, label)
 }
 
@@ -189,6 +234,20 @@ func envMsg(buf *imapclient.FetchMessageBuffer) *Msg {
 	e := buf.Envelope
 	m := &Msg{Subject: e.Subject, MessageID: e.MessageID, Size: buf.RFC822Size,
 		Read: slices.Contains(buf.Flags, imap.FlagSeen), Flagged: slices.Contains(buf.Flags, imap.FlagFlagged)}
+	if buf.BodyStructure != nil {
+		buf.BodyStructure.Walk(func(_ []int, part imap.BodyStructure) bool {
+			if p, ok := part.(*imap.BodyStructureSinglePart); ok {
+				if p.ID != "" && strings.HasPrefix(p.MediaType(), "image/") {
+					return true
+				}
+				d := p.Disposition()
+				if (d != nil && strings.EqualFold(d.Value, "attachment")) || p.Filename() != "" || !strings.HasPrefix(p.MediaType(), "text/") {
+					m.HasAttachment = true
+				}
+			}
+			return true
+		})
+	}
 	m.Date = e.Date.Unix()
 	if e.Date.IsZero() {
 		m.Date = buf.InternalDate.Unix()
@@ -208,6 +267,12 @@ func envMsg(buf *imapclient.FetchMessageBuffer) *Msg {
 		}
 	}
 	m.To = strings.Join(to, ", ")
+	for _, a := range e.To {
+		m.ToAddrs = append(m.ToAddrs, (&netmail.Address{Name: a.Name, Address: a.Addr()}).String())
+	}
+	for _, a := range e.Cc {
+		m.CcAddrs = append(m.CcAddrs, (&netmail.Address{Name: a.Name, Address: a.Addr()}).String())
+	}
 	if m.MessageID == "" {
 		m.MessageID = synthID(m)
 	}
@@ -423,6 +488,16 @@ func parseMsg(raw []byte) (*Msg, error) {
 		m.FromName = m.FromAddr
 	}
 	m.MessageID, _ = h.MessageID()
+	for _, field := range []struct {
+		name      string
+		addresses *[]string
+	}{{"To", &m.ToAddrs}, {"Cc", &m.CcAddrs}} {
+		if addresses, err := h.AddressList(field.name); err == nil {
+			for _, a := range addresses {
+				*field.addresses = append(*field.addresses, a.String())
+			}
+		}
+	}
 	if m.MessageID == "" {
 		m.MessageID = synthID(m)
 	}
@@ -512,7 +587,7 @@ const csp = `default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'
 // rewrite makes newsletter HTML safe to show: tracking pixels dropped, every
 // remote image routed through imgSrc, refresh/redirect meta removed, CSP added.
 // Scripts are blocked by the iframe sandbox, not here.
-func rewrite(src string, imgSrc func(u string) string) string {
+func rewrite(src string, imgSrc func(u string) string, images bool) string {
 	doc, err := html.Parse(strings.NewReader(src))
 	if err != nil {
 		return src
@@ -541,6 +616,8 @@ func rewrite(src string, imgSrc func(u string) string) string {
 					setAttr(c, "srcset", "")
 					if u := attr(c, "src"); strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
 						setAttr(c, "src", imgSrc(u))
+					} else if !strings.HasPrefix(u, "data:image/") {
+						setAttr(c, "src", "")
 					}
 				}
 				walk(c)
@@ -550,8 +627,12 @@ func rewrite(src string, imgSrc func(u string) string) string {
 	}
 	walk(doc)
 	if head != nil {
+		policy := csp
+		if !images {
+			policy = strings.Replace(policy, "img-src 'self' data:", "img-src data:", 1)
+		}
 		meta := &html.Node{Type: html.ElementNode, Data: "meta", DataAtom: atom.Meta, Attr: []html.Attribute{
-			{Key: "http-equiv", Val: "Content-Security-Policy"}, {Key: "content", Val: csp}}}
+			{Key: "http-equiv", Val: "Content-Security-Policy"}, {Key: "content", Val: policy}}}
 		head.InsertBefore(meta, head.FirstChild)
 	}
 	var b strings.Builder
@@ -593,9 +674,39 @@ func setAttr(n *html.Node, k, v string) {
 	}
 }
 
-func proxied(u string) string { return "/img?u=" + url.QueryEscape(u) }
+// Bypass browser responses cached before image validation was added.
+func proxied(u string) string { return "/img?u=" + url.QueryEscape(u) + "&v=2" }
 
-var httpc = &http.Client{Timeout: 20 * time.Second}
+var httpc = &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{
+	// Direct connections let Control validate the actual destination, including redirects.
+	DialContext:         (&net.Dialer{Timeout: 10 * time.Second, Control: imageAddress}).DialContext,
+	TLSHandshakeTimeout: 10 * time.Second,
+}}
+
+func imageAddress(network, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
+	}
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		return err
+	}
+	ip = ip.Unmap()
+	if ip.Zone() != "" || !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() ||
+		netip.MustParsePrefix("100.64.0.0/10").Contains(ip) || netip.MustParsePrefix("240.0.0.0/4").Contains(ip) {
+		return errors.New("remote images cannot access local or private network addresses")
+	}
+	return nil
+}
+
+func imageType(body []byte) (string, error) {
+	ct := http.DetectContentType(body)
+	if !strings.HasPrefix(ct, "image/") {
+		return "", errors.New("remote response is not an image")
+	}
+	return ct, nil
+}
 
 // imageTTL is how long a cached image survives without being shown.
 const imageTTL = 30 * 24 * time.Hour
@@ -609,10 +720,15 @@ func fetchImage(dir, u string) (body []byte, ctype string, err error) {
 	sum := sha256.Sum256([]byte(u))
 	path := filepath.Join(dir, "img", hex.EncodeToString(sum[:]))
 	if b, err := os.ReadFile(path); err == nil {
-		if ct, body, ok := bytes.Cut(b, []byte{'\n'}); ok {
+		if _, body, ok := bytes.Cut(b, []byte{'\n'}); ok {
+			ctype, err := imageType(body)
+			if err != nil {
+				os.Remove(path)
+				return nil, "", err
+			}
 			now := time.Now()
 			os.Chtimes(path, now, now)
-			return body, string(ct), nil
+			return body, ctype, nil
 		}
 	}
 	req, err := http.NewRequest("GET", u, nil)
@@ -628,13 +744,16 @@ func fetchImage(dir, u string) (body []byte, ctype string, err error) {
 	if resp.StatusCode != 200 {
 		return nil, "", fmt.Errorf("image %s: %s", u, resp.Status)
 	}
-	body, err = io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+	body, err = io.ReadAll(io.LimitReader(resp.Body, (10<<20)+1))
 	if err != nil {
 		return nil, "", err
 	}
-	ctype = resp.Header.Get("Content-Type")
-	if !strings.HasPrefix(ctype, "image/") {
-		ctype = http.DetectContentType(body)
+	if len(body) > 10<<20 {
+		return nil, "", errors.New("image exceeds 10 MB")
+	}
+	ctype, err = imageType(body)
+	if err != nil {
+		return nil, "", err
 	}
 	os.WriteFile(path, append([]byte(ctype+"\n"), body...), 0o644)
 	return body, ctype, nil
