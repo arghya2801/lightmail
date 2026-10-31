@@ -556,7 +556,7 @@
     ['f / j', 'Next message'], ['d / k', 'Previous message'], ['Space / Shift+Space', 'Page through the message, then open the next'],
     ['e', 'Archive'], ['# / Delete', 'Delete (in Trash or Spam: delete forever)'], ['!', 'Report spam (in Spam: not spam)'],
     ['z', 'Undo, while its toast is showing'], ['v', 'Move to…'], ['c / l', 'Add label…'], ['s', 'Star or unstar'],
-    ['t', 'Mark read or unread'], ['x', 'Select the open message'], ['Ctrl+A / Esc', 'Select all / clear the selection'],
+    ['t', 'Mark read or unread'], ['x', 'Select the open message'], ['Ctrl+A / Esc', 'Select all loaded messages / clear the selection'],
     ['Ctrl+F / /', 'Search all mail'], ['g 1 … g 9', 'Open the nth folder in the sidebar'], ['g f / g l', 'Go to any folder or label'],
     ['g i', 'Inbox'], ['g s', 'Settings'], ['Shift+T', 'Switch between Cards and Table'], ['r', 'Sync now'],
     ['Shift+S', 'Save the message as HTML'], ['Ctrl+Plus / Minus / 0', 'Zoom the message'], ['Ctrl+Shift+Plus / Minus / 0', 'Zoom the whole app'],
@@ -720,6 +720,7 @@
     {:else if selected.size > 1 || (selected.size && !selected.has(msg?.id))}
       <div class="bulk">
         <h1>{selected.size} selected</h1>
+        {#if more && selected.size >= items.length}<p class="muted">Only loaded messages are selected; scroll the list to load more.</p>{/if}
         <div class="actions">
           {#each actions as a (a.label)}<button onclick={a.run} title="{a.label} ({a.key})">{a.label}</button>{/each}
         </div>
