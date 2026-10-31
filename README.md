@@ -43,7 +43,7 @@ Every action has a key on the left half of the keyboard. Gmail's keys work too; 
 | `t` | `Shift+I` / `Shift+U` | Mark read or unread (toggles) |
 | `x` | | Select or deselect the open message |
 | `Ctrl+A` / `Esc` | | Select all loaded messages / clear the selection |
-| `Ctrl+F` | `/` | Search all mail (subject and sender; body text for messages you've opened). `Esc` leaves the box |
+| `Ctrl+F` | `/` | Search all mail (subject and sender; body text for messages you've opened). `Esc` clears it, then leaves the box |
 | `g 1` … `g 9` | | Open the nth folder in the sidebar (`g 1` is the Inbox) |
 | `g f` | `g l` | Go to any folder or label |
 | `g s` | | Settings |

@@ -496,7 +496,7 @@
     if (picker || document.querySelector('dialog[open]')) return
     if (menu && e.key === 'Escape') return (menu = null)
     if (e.target?.closest?.('input, textarea, select')) {
-      if (e.key === 'Escape') e.target.blur()
+      if (e.key === 'Escape') e.target === searchEl && q.search ? (q.search = '') : e.target.blur()
       return
     }
     // Space presses a control reached with the keyboard; after a mouse click it still pages.
@@ -653,7 +653,7 @@
 
       <div class="senders-head">
         <span class="muted">Senders</span>
-        <input placeholder="Filter" aria-label="Filter senders" bind:value={senderFilter} />
+        <input placeholder="Find a sender" aria-label="Find a sender" bind:value={senderFilter} />
       </div>
       {#each visibleSenders as s (s.key)}
         <button class="row sender" class:on={q.sender === s.key} title={s.key}
