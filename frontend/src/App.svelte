@@ -144,6 +144,7 @@
   })
 
   function go(name) {
+    if (name !== q.label) msg = null // its actions would use the new folder as the source
     q.label = name
     q.sender = ''
     q.search = ''
