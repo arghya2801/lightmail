@@ -566,6 +566,7 @@
 
   // Open the label menu leftward or upward when it would run off the window.
   function flip(el) {
+    el.querySelector('button')?.focus() // so the Menu key and Shift+F10 leave you in it
     const r = el.getBoundingClientRect()
     el.style.transform = `translate(${r.right > innerWidth ? '-100%' : 0}, ${r.bottom > innerHeight ? '-100%' : 0})`
   }
@@ -641,6 +642,7 @@
                 class:shut={collapsed.has(r.path)} onclick={() => fold(r.path)}>›</button>
             {/if}
             {#if r.folder}{@render folderRow(r.folder, r.text)}{:else}<span class="row virtual" role="presentation" oncontextmenu={(e) => openMenu(e, r.path, null)}>{r.text}</span>{/if}
+            <button class="more" aria-label="Options for {r.path}" title="Rename, delete or create a label inside (or right-click)" onclick={(e) => openMenu(e, r.path, r.folder)}>⋯</button>
           </div>
         {/each}
       {/if}
@@ -831,6 +833,8 @@
   .row.on { background: var(--paper); }
   .row.sender { content-visibility: auto; contain-intrinsic-size: auto 28px; }
   .row.virtual { color: var(--muted); }
+  .more { flex: none; padding: 0 6px; color: var(--muted); opacity: 0; }
+  .branch:hover .more, .more:focus-visible { opacity: 1; }
   .row.drop { background: var(--drop); box-shadow: inset 0 0 0 1px var(--focus); }
   .n { color: var(--muted); font-variant-numeric: tabular-nums; }
   .senders-head { display: flex; align-items: center; gap: 8px; padding: 20px 10px 6px; }

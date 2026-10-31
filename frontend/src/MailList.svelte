@@ -114,7 +114,7 @@
   .head.table { display: grid; column-gap: 6px; }
   .head:not(.table) .date { margin-left: auto; }
   .head > div { position: relative; min-width: 0; overflow: visible; white-space: nowrap; }
-  .head .pick, .head .star { visibility: visible; opacity: 1; padding: 0; color: inherit; }
+  .head .pick, .head .star { opacity: 1; padding: 0; color: inherit; }
   .head sup { font-size: 9px; }
   .head .date .split { left: -6px; right: auto; }
   .head button { padding: 2px 0; border-radius: 0; text-align: left; color: inherit; white-space: nowrap; }
@@ -126,8 +126,8 @@
   .item.open { background: var(--paper); }
   .item.picked { background: var(--picked); border-left-color: var(--focus); }
 
-  .pick { grid-area: pick; margin: 0; visibility: hidden; }
-  .item:hover .pick, .selecting .pick { visibility: visible; }
+  .pick { grid-area: pick; margin: 0; opacity: 0; } /* not visibility: it must stay reachable by Tab */
+  .item:hover .pick, .selecting .pick, .pick:focus-visible { opacity: 1; }
   .star { grid-area: star; padding: 0 2px; line-height: 1; color: var(--muted); opacity: 0.5; }
   .star:hover { background: none; opacity: 1; }
   .star.on { color: var(--star); opacity: 1; }
