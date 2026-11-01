@@ -325,8 +325,8 @@ func (a *App) syncAll(labels []string) error {
 	if err != nil {
 		return err
 	}
-	defer cl.Logout()
 	ss := &session{cl: cl}
+	defer func() { ss.cl.Logout() }()
 	folders, err := listFolders(cl)
 	if err != nil {
 		return err
@@ -343,13 +343,32 @@ func (a *App) syncAll(labels []string) error {
 	fetched := 0 // new messages across all folders
 	for _, l := range live {
 		done := 0
-		err := a.store.syncLabel(ss, l, func(n int) {
-			done = n
-			a.emit(SyncStatus{Running: true, Label: l, Count: fetched + n})
-		})
-		fetched += done
-		if err != nil {
-			return err
+		recovered := map[imap.UID]bool{}
+		for {
+			err := a.store.syncLabel(ss, l, func(n int) {
+				done = n
+				a.emit(SyncStatus{Running: true, Label: l, Count: fetched + n})
+			})
+			fetched += done
+			done = 0
+			var malformed *bodyStructureError
+			if !errors.As(err, &malformed) || recovered[malformed.uid] {
+				if err != nil {
+					return err
+				}
+				break
+			}
+			recovered[malformed.uid] = true
+			// A decode error closes the connection. Read this message as raw MIME instead.
+			ss.cl.Close()
+			cl, err := a.dial()
+			if err != nil {
+				return err
+			}
+			ss.cl, ss.sel = cl, ""
+			if err := a.store.fetchBodies(ss, l, []imap.UID{malformed.uid}); err != nil {
+				return err
+			}
 		}
 	}
 	if err := a.store.prune(live); err != nil {

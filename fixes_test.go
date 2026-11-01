@@ -1,16 +1,20 @@
 package main
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -336,6 +340,105 @@ func TestAttachmentAndRecipientSync(t *testing.T) {
 	if err != nil || len(m.ToAddrs) != 1 || len(m.CcAddrs) != 1 {
 		t.Fatalf("reader recipients: %+v %v", m, err)
 	}
+}
+
+func TestSyncEmptyMultipart(t *testing.T) {
+	f := newFakeIMAP(t)
+	broken := "From: Sender <sender@example.com>\r\nTo: Person <person@example.com>\r\nMessage-ID: <empty@example.com>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=A\r\n\r\n--A\r\nContent-Type: multipart/mixed; boundary=EMPTY\r\n\r\n--EMPTY--\r\n--A\r\nContent-Type: text/html\r\n\r\n<p>Still readable</p>\r\n--A--\r\n"
+	attachment := strings.Replace(broken, "<empty@example.com>", "<pdf@example.com>", 1)
+	attachment = strings.Replace(attachment, "Content-Type: multipart/mixed; boundary=EMPTY\r\n\r\n--EMPTY--", "Content-Type: application/pdf\r\nContent-Disposition: attachment; filename=report.pdf\r\n\r\n%PDF", 1)
+	if m, err := parseMsg([]byte(broken)); err != nil || !strings.Contains(m.HTML, "Still readable") {
+		t.Fatalf("raw empty multipart: %+v %v", m, err)
+	}
+	// The fake server refuses to serialize empty multiparts. Inject Gmail's exact wire shape instead.
+	serverMessage := strings.Replace(broken, "multipart/mixed; boundary=EMPTY", "application/x-empty", 1)
+	for _, raw := range []string{fixture, serverMessage, attachment} {
+		cmd := f.cl.Append("News", int64(len(raw)), &imap.AppendOptions{Flags: []imap.Flag{imap.FlagSeen}})
+		cmd.Write([]byte(raw))
+		cmd.Close()
+		if _, err := cmd.Wait(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := testStore(t)
+	dials := 0
+	a := &App{store: s, dial: func() (*imapclient.Client, error) {
+		dials++
+		conn, err := net.Dial("tcp", f.addr)
+		if err != nil {
+			return nil, err
+		}
+		cl := imapclient.New(&emptyMultipartConn{Conn: conn, reader: bufio.NewReader(conn)}, clientOpts)
+		t.Cleanup(func() { cl.Close() })
+		return cl, cl.Login("me", "pw").Wait()
+	}}
+	cl, err := a.dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cl.Select("News", nil).Wait()
+	_, err = cl.Fetch(imap.UIDSet{{Start: 1, Stop: 0}}, &imap.FetchOptions{BodyStructure: &imap.FetchItemBodyStructure{Extended: true}}).Collect()
+	cl.Close()
+	if err == nil || !strings.Contains(err.Error(), `in body-type-mpart: in body-type-1part: imapwire: expected string, got "("`) {
+		t.Fatalf("fixture did not reproduce Gmail's parser error: %v", err)
+	}
+	for pass := 0; pass < 3; pass++ {
+		if pass == 1 {
+			// Exercise metadata backfill for an existing UID as well as a fresh sync.
+			s.db.Exec(`UPDATE messages SET has_attachment=-1 WHERE message_id='empty@example.com'`)
+			if err := s.setFlag(idOf(t, s, "pdf@example.com"), `\Flagged`, true); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := a.syncAll([]string{"News"}); err != nil {
+			t.Fatalf("pass %d: %v", pass, err)
+		}
+		if count(s, `SELECT count(*) FROM messages`) != 3 || count(s, `SELECT count(*) FROM messages WHERE has_attachment=-1`) != 0 {
+			t.Fatal("sync lost a message or left metadata unfinished")
+		}
+		if count(s, `SELECT count(*) FROM bodies`) != 1 {
+			t.Fatal("recovery must download only the malformed message")
+		}
+		m, err := s.Get(idOf(t, s, "pdf@example.com"))
+		if err != nil || !m.HasAttachment || len(m.ToAddrs) != 1 {
+			t.Fatalf("valid attachment metadata lost: %+v %v", m, err)
+		}
+		m, err = a.Open(idOf(t, s, "empty@example.com"), false)
+		if err != nil || !strings.Contains(m.HTML, "Still readable") {
+			t.Fatalf("recovered message is unreadable: %+v %v", m, err)
+		}
+	}
+	if dials != 6 { // One reproduction, two recovering syncs, and one ordinary sync.
+		t.Fatalf("unexpected repeated recovery: %d connections", dials)
+	}
+	if count(s, `SELECT count(*) FROM pending_flags`) != 1 || count(s, `SELECT count(*) FROM messages WHERE flagged=1`) != 1 {
+		t.Fatal("recovery lost a pending flag change")
+	}
+	for _, flags := range f.flags("News") {
+		if !slices.Contains(flags, imap.FlagSeen) {
+			t.Fatal("sync changed server flags")
+		}
+	}
+}
+
+type emptyMultipartConn struct {
+	net.Conn
+	reader  *bufio.Reader
+	pending []byte
+}
+
+func (c *emptyMultipartConn) Read(p []byte) (int, error) {
+	if len(c.pending) == 0 {
+		line, err := c.reader.ReadString('\n')
+		if err != nil {
+			return 0, err
+		}
+		empty := regexp.MustCompile(`(?i)\("application" "x-empty" [^()]*\)`)
+		c.pending = []byte(empty.ReplaceAllString(line, `("MIXED" ("BOUNDARY" "EMPTY") NIL NIL)`))
+	}
+	n := copy(p, c.pending)
+	c.pending = c.pending[n:]
+	return n, nil
 }
 
 func TestAttachmentMetadataParts(t *testing.T) {
