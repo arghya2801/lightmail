@@ -327,6 +327,8 @@ type Msg struct {
 	Attachments   []Attachment `json:"attachments,omitempty"` // filled by Open
 	Blocked       int          `json:"blocked,omitempty"`     // remote images held back by Open
 	ImagesAllowed bool         `json:"imagesAllowed"`
+
+	attachmentUnknown bool // header-only fetches must preserve known attachment metadata
 }
 
 type Folder struct {
@@ -341,9 +343,13 @@ type Folder struct {
 func insertHeader(tx *sql.Tx, m *Msg, label string, uid uint32) error {
 	to, _ := json.Marshal(m.ToAddrs)
 	cc, _ := json.Marshal(m.CcAddrs)
+	var attachment any = m.HasAttachment
+	if m.attachmentUnknown {
+		attachment = -1
+	}
 	res, err := tx.Exec(`INSERT INTO messages(message_id,from_name,from_addr,to_addrs,subject,date,size,read,flagged,to_recipients,cc_recipients,has_attachment)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(message_id) DO NOTHING`,
-		m.MessageID, m.FromName, m.FromAddr, m.To, m.Subject, m.Date, m.Size, m.Read, m.Flagged, string(to), string(cc), m.HasAttachment)
+		m.MessageID, m.FromName, m.FromAddr, m.To, m.Subject, m.Date, m.Size, m.Read, m.Flagged, string(to), string(cc), attachment)
 	if err != nil {
 		return err
 	}
@@ -356,7 +362,7 @@ func insertHeader(tx *sql.Tx, m *Msg, label string, uid uint32) error {
 	} else if err := tx.QueryRow(`SELECT id FROM messages WHERE message_id=?`, m.MessageID).Scan(&id); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE messages SET to_recipients=?,cc_recipients=?,has_attachment=? WHERE id=?`, string(to), string(cc), m.HasAttachment, id); err != nil {
+	if _, err := tx.Exec(`UPDATE messages SET to_recipients=?,cc_recipients=?,has_attachment=CASE WHEN ?=-1 THEN has_attachment ELSE ? END WHERE id=?`, string(to), string(cc), attachment, attachment, id); err != nil {
 		return err
 	}
 	_, err = tx.Exec(`INSERT INTO message_labels VALUES(?,?,?) ON CONFLICT(message_id,label) DO UPDATE SET uid=excluded.uid`, id, label, uid)

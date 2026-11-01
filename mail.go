@@ -110,6 +110,15 @@ func defaultSynced(f Folder) bool { return f.Role != "all" && f.Role != "importa
 
 var batch = 500 // var so tests can shrink it
 
+// Gmail can return an unparseable BODYSTRUCTURE for an empty multipart section.
+type bodyStructureError struct {
+	uid imap.UID
+	err error
+}
+
+func (e *bodyStructureError) Error() string { return e.err.Error() }
+func (e *bodyStructureError) Unwrap() error { return e.err }
+
 // syncLabel brings one folder up to date: headers of new messages, then
 // reconcile. Bodies are not fetched here. Commits every `batch` messages so
 // memory stays flat and an interrupted sync resumes.
@@ -157,7 +166,6 @@ func (s *Store) syncLabel(ss *session, label string, progress func(int)) error {
 	if sel.NumMessages > 0 && (sel.UIDNext == 0 || uint32(sel.UIDNext) > last+1) {
 		cmd := ss.cl.Fetch(imap.UIDSet{{Start: imap.UID(last + 1), Stop: 0}}, &imap.FetchOptions{
 			UID: true, Flags: true, Envelope: true, RFC822Size: true, InternalDate: true,
-			BodyStructure: &imap.FetchItemBodyStructure{Extended: true},
 		})
 		defer cmd.Close()
 		n := 0
@@ -186,7 +194,7 @@ func (s *Store) syncLabel(ss *session, label string, progress func(int)) error {
 	if err := save(); err != nil {
 		return err
 	}
-	// Older caches already know the UIDs, but not the attachment or recipient metadata.
+	// Fetch attachment metadata separately so malformed structures cannot discard headers.
 	rows, err := s.db.Query(`SELECT l.uid FROM message_labels l JOIN messages m ON m.id=l.message_id WHERE l.label=? AND m.has_attachment=-1`, label)
 	if err != nil {
 		return err
@@ -209,17 +217,22 @@ func (s *Store) syncLabel(ss *session, label string, progress func(int)) error {
 		cmd := ss.cl.Fetch(imap.UIDSetNum(missing[start:min(start+batch, len(missing))]...), &imap.FetchOptions{
 			UID: true, Flags: true, Envelope: true, RFC822Size: true, InternalDate: true, BodyStructure: &imap.FetchItemBodyStructure{Extended: true},
 		})
+		var uid imap.UID
 		for fm := cmd.Next(); fm != nil; fm = cmd.Next() {
 			buf, err := fm.Collect()
 			if err != nil {
 				cmd.Close()
 				return err
 			}
-			if buf.Envelope != nil {
+			uid = buf.UID
+			if buf.Envelope != nil && buf.BodyStructure != nil {
 				got = append(got, hdr{envMsg(buf), uint32(buf.UID)})
 			}
 		}
 		if err := cmd.Close(); err != nil {
+			if uid != 0 && strings.Contains(err.Error(), "in body-") {
+				return &bodyStructureError{uid: uid, err: err}
+			}
 			return err
 		}
 		if err := save(); err != nil {
@@ -232,7 +245,8 @@ func (s *Store) syncLabel(ss *session, label string, progress func(int)) error {
 func envMsg(buf *imapclient.FetchMessageBuffer) *Msg {
 	e := buf.Envelope
 	m := &Msg{Subject: e.Subject, MessageID: e.MessageID, Size: buf.RFC822Size,
-		Read: slices.Contains(buf.Flags, imap.FlagSeen), Flagged: slices.Contains(buf.Flags, imap.FlagFlagged)}
+		Read: slices.Contains(buf.Flags, imap.FlagSeen), Flagged: slices.Contains(buf.Flags, imap.FlagFlagged),
+		attachmentUnknown: buf.BodyStructure == nil}
 	if buf.BodyStructure != nil {
 		buf.BodyStructure.Walk(func(_ []int, part imap.BodyStructure) bool {
 			if p, ok := part.(*imap.BodyStructureSinglePart); ok {
