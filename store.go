@@ -33,6 +33,9 @@ type Config struct {
 	// set they load only for senders on this list, or when asked.
 	BlockImages  bool     `json:"blockImages"`
 	ImageSenders []string `json:"imageSenders"`
+	// Snoozed maps a Message-ID to when it returns to the Inbox (Unix seconds).
+	// It lives here rather than in the cache, so deleting cache.db can't strand mail in All Mail.
+	Snoozed map[string]int64 `json:"snoozed,omitempty"`
 }
 
 // dataDir picks where settings and the cache live: $LIGHTMAIL_DATA if set; a "data"
@@ -147,8 +150,11 @@ CREATE TABLE IF NOT EXISTS messages(
   id INTEGER PRIMARY KEY, message_id TEXT UNIQUE NOT NULL,
   from_name TEXT NOT NULL, from_addr TEXT NOT NULL, to_addrs TEXT NOT NULL, subject TEXT NOT NULL,
   date INTEGER NOT NULL, size INTEGER NOT NULL, read INTEGER NOT NULL DEFAULT 0, flagged INTEGER NOT NULL DEFAULT 0,
-  to_recipients TEXT NOT NULL DEFAULT '[]', cc_recipients TEXT NOT NULL DEFAULT '[]', has_attachment INTEGER NOT NULL DEFAULT -1);
+  to_recipients TEXT NOT NULL DEFAULT '[]', cc_recipients TEXT NOT NULL DEFAULT '[]', has_attachment INTEGER NOT NULL DEFAULT -1,
+  in_reply_to TEXT NOT NULL DEFAULT '', thread INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS messages_date ON messages(date);
+CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread);
+CREATE INDEX IF NOT EXISTS messages_reply ON messages(in_reply_to);
 CREATE TABLE IF NOT EXISTS bodies(id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE, raw BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS message_labels(
   message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE, label TEXT NOT NULL, uid INTEGER NOT NULL,
@@ -194,8 +200,8 @@ func (s *Store) changedSince(id int64, mark uint64) bool {
 	return s.touched[id] > mark
 }
 
-// Version 2 migrates in place; older incompatible caches are rebuilt.
-const schemaVersion = 3
+// Versions 2 and 3 migrate in place; older incompatible caches are rebuilt.
+const schemaVersion = 4
 
 func openStore(path string) (*Store, error) {
 	// WAL lets the list read while a sync writes. Pragmas are per connection, so
@@ -210,6 +216,13 @@ func openStore(path string) (*Store, error) {
 	db.QueryRow(`SELECT count(*) FROM sqlite_master`).Scan(&tables)
 	if v == 2 {
 		if err := migrateMetadata(db); err != nil {
+			db.Close()
+			return nil, err
+		}
+		v = 3
+	}
+	if v == 3 {
+		if err := migrateThreads(db); err != nil {
 			db.Close()
 			return nil, err
 		}
@@ -283,7 +296,25 @@ func migrateMetadata(db *sql.DB) error {
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version=%d", schemaVersion)); err != nil {
+	if _, err := tx.Exec(`PRAGMA user_version=3`); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// migrateThreads adds conversations. Every message starts as its own thread,
+// and each folder's headers are fetched again to learn what they reply to.
+func migrateThreads(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`ALTER TABLE messages ADD COLUMN in_reply_to TEXT NOT NULL DEFAULT '';
+		ALTER TABLE messages ADD COLUMN thread INTEGER NOT NULL DEFAULT 0;
+		UPDATE messages SET thread=id;
+		UPDATE label_state SET last_uid=0;
+		PRAGMA user_version=4;`); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -310,6 +341,8 @@ func unpack(b []byte) ([]byte, error) {
 type Msg struct {
 	ID            int64        `json:"id"`
 	MessageID     string       `json:"-"`
+	InReplyTo     string       `json:"-"`
+	Count         int          `json:"count,omitempty"` // messages in the conversation, when the list is grouped
 	FromName      string       `json:"fromName"`
 	FromAddr      string       `json:"fromAddr"`
 	To            string       `json:"to"` // display names of To and Cc, comma-separated
@@ -327,6 +360,8 @@ type Msg struct {
 	Attachments   []Attachment `json:"attachments,omitempty"` // filled by Open
 	Blocked       int          `json:"blocked,omitempty"`     // remote images held back by Open
 	ImagesAllowed bool         `json:"imagesAllowed"`
+	Unsubscribe   string       `json:"unsubscribe,omitempty"` // List-Unsubscribe link, filled by Open
+	OneClick      bool         `json:"oneClick,omitempty"`    // the sender takes a one-click POST (RFC 8058)
 
 	attachmentUnknown bool // header-only fetches must preserve known attachment metadata
 }
@@ -365,7 +400,35 @@ func insertHeader(tx *sql.Tx, m *Msg, label string, uid uint32) error {
 	if _, err := tx.Exec(`UPDATE messages SET to_recipients=?,cc_recipients=?,has_attachment=CASE WHEN ?=-1 THEN has_attachment ELSE ? END WHERE id=?`, string(to), string(cc), attachment, attachment, id); err != nil {
 		return err
 	}
+	if err := linkThread(tx, id, m.MessageID, m.InReplyTo); err != nil {
+		return err
+	}
 	_, err = tx.Exec(`INSERT INTO message_labels VALUES(?,?,?) ON CONFLICT(message_id,label) DO UPDATE SET uid=excluded.uid`, id, label, uid)
+	return err
+}
+
+// linkThread puts message id in its parent's conversation, and pulls in replies
+// that arrived before it. Threads follow In-Reply-To, so a reply whose parent
+// isn't in any synced folder starts a conversation of its own.
+// ponytail: In-Reply-To chains only; Gmail's X-GM-THRID would also join those, once go-imap can fetch it.
+func linkThread(tx *sql.Tx, id int64, messageID, inReplyTo string) error {
+	var t int64
+	if err := tx.QueryRow(`UPDATE messages SET in_reply_to=?2, thread=CASE thread WHEN 0 THEN id ELSE thread END
+		WHERE id=?1 RETURNING thread`, id, inReplyTo).Scan(&t); err != nil {
+		return err
+	}
+	var parent int64
+	if inReplyTo != "" {
+		tx.QueryRow(`SELECT thread FROM messages WHERE message_id=? AND thread<>0`, inReplyTo).Scan(&parent)
+	}
+	if parent != 0 && parent != t {
+		if _, err := tx.Exec(`UPDATE messages SET thread=? WHERE thread=?`, parent, t); err != nil {
+			return err
+		}
+		t = parent
+	}
+	_, err := tx.Exec(`UPDATE messages SET thread=?1 WHERE thread IN
+		(SELECT thread FROM messages WHERE in_reply_to=?2 AND thread NOT IN (0, ?1))`, t, messageID)
 	return err
 }
 
@@ -500,11 +563,13 @@ func (s *Store) prune(live []string) error {
 }
 
 type Query struct {
-	Label  string `json:"label"`
-	Sender string `json:"sender"`
-	Search string `json:"search"`
-	Sort   string `json:"sort"`
-	Offset int    `json:"offset"`
+	Label   string `json:"label"`
+	Sender  string `json:"sender"`
+	Search  string `json:"search"`
+	Sort    string `json:"sort"`
+	Offset  int    `json:"offset"`
+	Limit   int    `json:"limit"`   // rows wanted; at least pageSize, so a reload can keep everything already shown
+	Threads bool   `json:"threads"` // one row per conversation
 }
 
 // sortCols maps the column names in Query.Sort to SQL; Sort is "col:dir,..."
@@ -547,6 +612,10 @@ func ftsQuery(s string) string {
 	return strings.Join(parts, " ")
 }
 
+// live is true for message m outside Trash and Spam.
+const live = `EXISTS(SELECT 1 FROM message_labels l LEFT JOIN folders f ON f.name=l.label
+	WHERE l.message_id=m.id AND coalesce(f.role,'') NOT IN ('trash','junk'))`
+
 // where builds the shared filter for List and Senders. No label means all
 // mail: everything outside Trash and Spam.
 func where(label, sender, search string) (string, []any) {
@@ -555,8 +624,7 @@ func where(label, sender, search string) (string, []any) {
 		w = "EXISTS(SELECT 1 FROM message_labels l WHERE l.message_id=m.id AND l.label=?)"
 		args = append(args, label)
 	} else {
-		w = `EXISTS(SELECT 1 FROM message_labels l LEFT JOIN folders f ON f.name=l.label
-			WHERE l.message_id=m.id AND coalesce(f.role,'') NOT IN ('trash','junk'))`
+		w = live
 	}
 	if sender != "" {
 		w += " AND m.from_addr=?"
@@ -573,9 +641,9 @@ const pageSize = 100
 
 const msgCols = `m.id,m.from_name,m.from_addr,m.to_addrs,m.subject,m.date,m.read,m.flagged,m.to_recipients,m.cc_recipients,m.has_attachment>0`
 
-func scanMsg(row interface{ Scan(...any) error }, m *Msg) error {
+func scanMsg(row interface{ Scan(...any) error }, m *Msg, extra ...any) error {
 	var to, cc string
-	if err := row.Scan(&m.ID, &m.FromName, &m.FromAddr, &m.To, &m.Subject, &m.Date, &m.Read, &m.Flagged, &to, &cc, &m.HasAttachment); err != nil {
+	if err := row.Scan(append([]any{&m.ID, &m.FromName, &m.FromAddr, &m.To, &m.Subject, &m.Date, &m.Read, &m.Flagged, &to, &cc, &m.HasAttachment}, extra...)...); err != nil {
 		return err
 	}
 	if err := json.Unmarshal([]byte(to), &m.ToAddrs); err != nil {
@@ -584,10 +652,47 @@ func scanMsg(row interface{ Scan(...any) error }, m *Msg) error {
 	return json.Unmarshal([]byte(cc), &m.CcAddrs)
 }
 
+// threadRows groups the filtered messages by conversation: the newest match
+// stands for each, unread if any match is, starred if any is. Count spans the
+// whole conversation outside Trash and Spam, as in Gmail.
+const threadRows = `SELECT * FROM (SELECT m.id, m.from_name, m.from_addr, m.to_addrs, m.subject, m.date,
+	min(m.read) OVER p read, max(m.flagged) OVER p flagged, m.to_recipients, m.cc_recipients, m.has_attachment, m.thread,
+	row_number() OVER (PARTITION BY m.thread ORDER BY m.date DESC, m.id DESC) rn
+	FROM messages m WHERE %s WINDOW p AS (PARTITION BY m.thread)) m WHERE rn=1`
+
 func (s *Store) List(q Query) ([]Msg, error) {
 	w, args := where(q.Label, q.Sender, q.Search)
-	rows, err := s.db.Query(`SELECT `+msgCols+` FROM messages m WHERE `+w+
-		` ORDER BY `+orderBy(q.Sort)+` LIMIT ? OFFSET ?`, append(args, pageSize, q.Offset)...)
+	from, cols := `messages m WHERE `+w, msgCols
+	if q.Threads {
+		from = `(` + fmt.Sprintf(threadRows, w) + `) m`
+		cols += `, (SELECT count(*) FROM messages t WHERE t.thread=m.thread AND ` + strings.ReplaceAll(live, "m.id", "t.id") + `)`
+	}
+	limit := min(max(q.Limit, pageSize), 5000)
+	rows, err := s.db.Query(`SELECT `+cols+` FROM `+from+` ORDER BY `+orderBy(q.Sort)+` LIMIT ? OFFSET ?`, append(args, limit, q.Offset)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Msg{}
+	for rows.Next() {
+		var m Msg
+		var extra []any
+		if q.Threads {
+			extra = []any{&m.Count}
+		}
+		if err := scanMsg(rows, &m, extra...); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// Thread returns message id's conversation, oldest first: everything outside
+// Trash and Spam, and id itself wherever it is.
+func (s *Store) Thread(id int64) ([]Msg, error) {
+	rows, err := s.db.Query(`SELECT `+msgCols+` FROM messages m WHERE m.thread=(SELECT thread FROM messages WHERE id=?1)
+		AND (m.id=?1 OR `+live+`) ORDER BY m.date, m.id`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -599,6 +704,30 @@ func (s *Store) List(q Query) ([]Msg, error) {
 			return nil, err
 		}
 		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// ThreadMembers widens ids to every message in their conversations that is in
+// label (or, with no label, outside Trash and Spam), so an action on a grouped
+// row reaches the whole conversation there. A message outside label is left
+// out, since actions take messages out of label.
+func (s *Store) ThreadMembers(ids []int64, label string) ([]int64, error) {
+	w, args := where(label, "", "")
+	j, _ := json.Marshal(ids)
+	rows, err := s.db.Query(`SELECT m.id FROM messages m WHERE m.thread IN (SELECT thread FROM messages WHERE id IN (SELECT value FROM json_each(?)))
+		AND `+w+` ORDER BY m.date DESC`, append([]any{string(j)}, args...)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
 	}
 	return out, rows.Err()
 }

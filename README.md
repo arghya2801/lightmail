@@ -27,6 +27,12 @@ Click a message to open it. Ctrl+click, Shift+click, the checkbox that appears o
 
 The headings above the list sort it: Unread, Starred, Sender, Subject and Date. Click one to sort by it alone, and again to reverse it. Shift+click adds it as another level, so Sender then Date groups each sender's mail newest first; Shift+click it again to reverse that level, a third time to remove it. The sort is remembered. While you search or filter by sender, a line above the list shows the scope and how many messages are loaded; click a part to clear it.
 
+The button beside the search box (or `Shift+C`) groups the list into conversations: one row per conversation, showing its newest message, with a count when it holds more than one. Archive, delete, move, label and mark read then act on the whole conversation in the folder you're viewing. Whether grouped or not, an open message that belongs to a conversation lists the other messages above its body; click one to read it. Lightmail joins replies by their In-Reply-To header, so a reply whose original isn't in any synced folder starts a conversation of its own (sync Sent to keep your own replies in).
+
+In the Inbox, **Snooze…** (`b`) archives a message and brings it back to the Inbox at a time you pick: later today, tomorrow, the weekend, next week, or any date and time. Lightmail has to be running then; if it's closed, snoozed mail comes back when you next open it. Snoozes are kept in `config.json`, so deleting the cache doesn't lose them.
+
+Mail from a mailing list shows **Unsubscribe** beside the sender. When the sender supports one-click unsubscribe, Lightmail sends the request itself after asking; otherwise it opens the sender's unsubscribe page, or an unsubscribe email in your default mail app.
+
 Right-click a label, press the Menu key on it, or use its ⋯ button to rename it, delete it, or create one inside it. The + next to Labels creates a top-level one.
 
 Every action has a key on the left half of the keyboard. Gmail's keys work too; they're in the second column. Press `?` in the app for this list, or hover a button to see its key.
@@ -36,6 +42,7 @@ Every action has a key on the left half of the keyboard. Gmail's keys work too; 
 | `f` / `d` | `j` / `k` | Next / previous message |
 | `Space` / `Shift+Space` | | Page down / up through the message; at the end, Space opens the next one |
 | `e` | | Archive |
+| `b` | | Snooze (in the Inbox) |
 | `#` | `Delete` | Delete (in Trash or Spam: delete forever) |
 | `!` | | Report spam (in Spam: not spam) |
 | `z` | | Undo the last move or delete, while its toast is showing |
@@ -51,6 +58,7 @@ Every action has a key on the left half of the keyboard. Gmail's keys work too; 
 | `g s` | | Settings |
 | | `g i` | Inbox |
 | `Shift+T` | | Switch between Cards and Table |
+| `Shift+C` | | Group conversations, or list every message |
 | `r` | | Sync now |
 | `Shift+S` | | Save the message as HTML |
 | `Ctrl+Plus` / `Minus` / `0`, `Ctrl`+scroll | | Zoom the message only (remembered; click the % to reset) |

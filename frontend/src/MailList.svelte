@@ -107,7 +107,7 @@
         onclick={(e) => { e.stopPropagation(); ontoggle(m, e) }} /></span>
       <span role="gridcell" class="star"><button class="star-button" tabindex="-1" class:on={m.flagged} aria-label={m.flagged ? 'Unstar' : 'Star'} title="{m.flagged ? 'Unstar' : 'Star'} (s)"
         onclick={(e) => { e.stopPropagation(); onstar(m) }}>{m.flagged ? '★' : '☆'}</button></span>
-      <span role="gridcell" class="from" title={m.fromAddr}>{m.fromName || m.fromAddr || '(unknown sender)'}</span>
+      <span role="gridcell" class="from" title={m.fromAddr}>{m.fromName || m.fromAddr || '(unknown sender)'}{#if m.count > 1}<span class="count" aria-label=", {m.count} messages">&ensp;{m.count}</span>{/if}</span>
       <span role="gridcell" class="date" title={full(m.date)}>{fmtDate(m.date)}</span>
       <span role="gridcell" class="subj">{#if m.hasAttachment}<svg class="attachment" viewBox="0 0 16 16" width="13" height="13" role="img" aria-label="Has attachments"><path d="m5 9 5-5a2 2 0 0 1 3 3l-7 7a3 3 0 0 1-4-4l7-7" fill="none" stroke="currentColor" stroke-width="1.4" /></svg> {/if}{m.subject || '(no subject)'}</span>
     </div>
@@ -175,5 +175,6 @@
   .date { grid-area: date; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .subj { grid-area: subj; color: color-mix(in srgb, var(--ink) 80%, var(--chrome)); }
   .unread .from, .unread .subj { color: var(--ink); font-weight: 600; }
+  .count { color: var(--muted); font-weight: 400; font-size: 12px; font-variant-numeric: tabular-nums; }
   .empty { padding: 32px 24px; }
 </style>
