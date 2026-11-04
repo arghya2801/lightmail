@@ -52,10 +52,20 @@ export function SetFlags(arg1:Array<number>,arg2:string,arg3:boolean):Promise<vo
 
 export function SetReaderZoom(arg1:number):Promise<void>;
 
+export function Snooze(arg1:Array<number>,arg2:number):Promise<Array<main.Moved>>;
+
 export function Spam(arg1:Array<number>,arg2:string):Promise<Array<main.Moved>>;
 
 export function Sync():Promise<void>;
 
+export function Thread(arg1:number):Promise<Array<main.Msg>>;
+
+export function ThreadMembers(arg1:Array<number>,arg2:string):Promise<Array<number>>;
+
 export function Trash(arg1:Array<number>,arg2:string):Promise<Array<main.Moved>>;
 
 export function Undo(arg1:Array<main.Moved>):Promise<void>;
+
+export function Unsnooze(arg1:Array<number>):Promise<void>;
+
+export function Unsubscribe(arg1:number):Promise<boolean>;

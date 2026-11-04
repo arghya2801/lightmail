@@ -32,6 +32,7 @@ export namespace main {
 	    readerZoom: number;
 	    blockImages: boolean;
 	    imageSenders: string[];
+	    snoozed?: Record<string, number>;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -52,6 +53,7 @@ export namespace main {
 	        this.readerZoom = source["readerZoom"];
 	        this.blockImages = source["blockImages"];
 	        this.imageSenders = source["imageSenders"];
+	        this.snoozed = source["snoozed"];
 	    }
 	}
 	export class Count {
@@ -112,6 +114,7 @@ export namespace main {
 	}
 	export class Msg {
 	    id: number;
+	    count?: number;
 	    fromName: string;
 	    fromAddr: string;
 	    to: string;
@@ -127,6 +130,8 @@ export namespace main {
 	    attachments?: Attachment[];
 	    blocked?: number;
 	    imagesAllowed: boolean;
+	    unsubscribe?: string;
+	    oneClick?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Msg(source);
@@ -135,6 +140,7 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
+	        this.count = source["count"];
 	        this.fromName = source["fromName"];
 	        this.fromAddr = source["fromAddr"];
 	        this.to = source["to"];
@@ -150,6 +156,8 @@ export namespace main {
 	        this.attachments = this.convertValues(source["attachments"], Attachment);
 	        this.blocked = source["blocked"];
 	        this.imagesAllowed = source["imagesAllowed"];
+	        this.unsubscribe = source["unsubscribe"];
+	        this.oneClick = source["oneClick"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -176,6 +184,8 @@ export namespace main {
 	    search: string;
 	    sort: string;
 	    offset: number;
+	    limit: number;
+	    threads: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Query(source);
@@ -188,6 +198,8 @@ export namespace main {
 	        this.search = source["search"];
 	        this.sort = source["sort"];
 	        this.offset = source["offset"];
+	        this.limit = source["limit"];
+	        this.threads = source["threads"];
 	    }
 	}
 	export class ServerFolder {

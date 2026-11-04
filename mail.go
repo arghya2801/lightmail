@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -15,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -289,6 +291,9 @@ func envMsg(buf *imapclient.FetchMessageBuffer) *Msg {
 	if m.MessageID == "" {
 		m.MessageID = synthID(m)
 	}
+	if len(e.InReplyTo) > 0 {
+		m.InReplyTo = e.InReplyTo[0]
+	}
 	return m
 }
 
@@ -521,6 +526,7 @@ func parseMsg(raw []byte) (*Msg, error) {
 	if m.MessageID == "" {
 		m.MessageID = synthID(m)
 	}
+	m.Unsubscribe, m.OneClick = unsubscribeLink(h.Get("List-Unsubscribe"), h.Get("List-Unsubscribe-Post"))
 
 	var htmlBody, plain string
 	cids := map[string]string{} // Content-ID -> data: URI
@@ -576,6 +582,52 @@ func parseMsg(raw []byte) (*Msg, error) {
 	return m, nil
 }
 
+// unsubscribeLink picks a List-Unsubscribe target (RFC 2369): the first web
+// link, else the first mail link. oneClick says the sender takes a bare POST
+// to an https link instead of a visit (RFC 8058).
+// ponytail: trusts the header without checking its DKIM signature, as RFC 8058 asks; the POST is user-initiated and public-only.
+func unsubscribeLink(list, post string) (link string, oneClick bool) {
+	for rest := list; ; {
+		_, after, ok := strings.Cut(rest, "<")
+		if !ok {
+			break
+		}
+		u, next, ok := strings.Cut(after, ">")
+		if !ok {
+			break
+		}
+		rest = next
+		u = strings.Join(strings.Fields(u), "") // folded headers can split a long URL
+		lower := strings.ToLower(u)
+		if strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://") {
+			return u, strings.HasPrefix(lower, "https://") && strings.EqualFold(strings.TrimSpace(post), "List-Unsubscribe=One-Click")
+		}
+		if strings.HasPrefix(lower, "mailto:") && link == "" {
+			link = u
+		}
+	}
+	return link, false
+}
+
+// oneClickUnsubscribe sends the RFC 8058 POST. It goes through httpc, so like
+// images it can't reach local or private addresses.
+func oneClickUnsubscribe(u string) error {
+	req, err := http.NewRequest("POST", u, strings.NewReader("List-Unsubscribe=One-Click"))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := httpc.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("the sender's server answered %s", resp.Status)
+	}
+	return nil
+}
+
 // htmlText extracts visible text, used for search.
 func htmlText(s string) string {
 	z := html.NewTokenizer(strings.NewReader(s))
@@ -612,15 +664,32 @@ func rewrite(src string, imgSrc func(u string) string, images bool) string {
 	if err != nil {
 		return src
 	}
+	// Responsive mail hides its mobile images and shows them from a media query.
+	unhidable := strings.Contains(src, "@media")
 	var head *html.Node
 	var walk func(*html.Node)
 	walk = func(n *html.Node) {
 		for c := n.FirstChild; c != nil; {
 			next := c.NextSibling
 			if c.Type == html.ElementNode {
+				if st := attr(c, "style"); st != "" {
+					setAttr(c, "style", rewriteCSS(st, imgSrc))
+				}
+				if u := cleanURL(attr(c, "background")); u != "" { // old-style table backgrounds
+					if remote(u) {
+						u = imgSrc(u)
+					} else if !strings.HasPrefix(u, "data:image/") {
+						u = ""
+					}
+					setAttr(c, "background", u)
+				}
 				switch c.DataAtom {
 				case atom.Head:
 					head = c
+				case atom.Style:
+					if t := c.FirstChild; t != nil && t.Type == html.TextNode {
+						t.Data = rewriteCSS(t.Data, imgSrc)
+					}
 				case atom.Script, atom.Iframe, atom.Object, atom.Embed, atom.Meta:
 					if c.DataAtom != atom.Meta || attr(c, "http-equiv") != "" {
 						n.RemoveChild(c)
@@ -628,13 +697,13 @@ func rewrite(src string, imgSrc func(u string) string, images bool) string {
 						continue
 					}
 				case atom.Img:
-					if isPixel(c) {
+					if isPixel(c, unhidable) {
 						n.RemoveChild(c)
 						c = next
 						continue
 					}
 					setAttr(c, "srcset", "")
-					if u := attr(c, "src"); strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+					if u := cleanURL(attr(c, "src")); remote(u) {
 						setAttr(c, "src", imgSrc(u))
 					} else if !strings.HasPrefix(u, "data:image/") {
 						setAttr(c, "src", "")
@@ -660,12 +729,45 @@ func rewrite(src string, imgSrc func(u string) string, images bool) string {
 	return b.String()
 }
 
-func isPixel(n *html.Node) bool {
-	w, h := attr(n, "width"), attr(n, "height")
-	tiny := func(v string) bool { v = strings.TrimSuffix(v, "px"); return v == "0" || v == "1" }
-	st := strings.ReplaceAll(strings.ToLower(attr(n, "style")), " ", "")
+// cleanURL drops the tabs and line breaks browsers ignore inside URLs, which
+// mail wraps long tracking links with.
+func cleanURL(u string) string {
+	return strings.TrimSpace(strings.NewReplacer("\t", "", "\n", "", "\r", "").Replace(u))
+}
+
+func remote(u string) bool {
+	u = strings.ToLower(u)
+	return strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://")
+}
+
+// cssImage finds background images in CSS. Fonts and @import are left alone:
+// the CSP blocks them, and the image proxy would refuse them anyway.
+var cssImage = regexp.MustCompile(`(?i)(background(?:-image)?\s*:[^;{}]*?url\(\s*)(['"]?)([^'")]*)['"]?(\s*\))`)
+
+// rewriteCSS routes remote background images through imgSrc, as rewrite does for <img>.
+func rewriteCSS(css string, imgSrc func(string) string) string {
+	return cssImage.ReplaceAllStringFunc(css, func(s string) string {
+		p := cssImage.FindStringSubmatch(s)
+		if u := cleanURL(p[3]); remote(u) {
+			return p[1] + `"` + imgSrc(u) + `"` + p[4]
+		}
+		return s
+	})
+}
+
+// isPixel spots tracking images: 0 or 1 pixel wide or high, by attribute or CSS,
+// and hidden ones, unless a media query in the mail could show them.
+func isPixel(n *html.Node, unhidable bool) bool {
+	css := map[string]string{}
+	for _, d := range strings.Split(strings.ToLower(attr(n, "style")), ";") {
+		if k, v, ok := strings.Cut(d, ":"); ok {
+			css[strings.TrimSpace(k)] = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(v), "!important"))
+		}
+	}
+	w, h := cmp.Or(css["width"], attr(n, "width")), cmp.Or(css["height"], attr(n, "height")) // CSS wins, as when rendered
+	tiny := func(v string) bool { v = strings.TrimSpace(strings.TrimSuffix(v, "px")); return v == "0" || v == "1" }
 	return (tiny(w) && tiny(h)) || (tiny(w) && h == "") || (tiny(h) && w == "") ||
-		strings.Contains(st, "display:none") || strings.Contains(st, "width:1px;height:1px") || strings.Contains(st, "width:0")
+		strings.TrimSuffix(css["width"], "px") == "0" || (css["display"] == "none" && !unhidable)
 }
 
 func attr(n *html.Node, k string) string {

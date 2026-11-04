@@ -256,3 +256,93 @@ func TestLabels(t *testing.T) {
 		}
 	}
 }
+
+// TestThreads: replies join their parent's conversation whichever arrives
+// first, the grouped list shows one row per conversation, and actions widen
+// to the conversation's messages in the folder.
+func TestThreads(t *testing.T) {
+	s := testStore(t)
+	s.setFolders([]Folder{{Name: "INBOX", Role: "inbox"}, {Name: "Sent", Role: "sent"}, {Name: "Trash", Role: "trash"}})
+	tx, _ := s.db.Begin()
+	for i, h := range []struct {
+		mid, parent, label string
+		date               int64
+	}{
+		{"c@x", "b@x", "INBOX", 3}, // the reply to b arrives before b
+		{"a@x", "", "INBOX", 1},
+		{"b@x", "a@x", "Sent", 2},
+		{"d@x", "", "INBOX", 4},
+		{"e@x", "a@x", "Trash", 5},
+	} {
+		if err := insertHeader(tx, &Msg{MessageID: h.mid, InReplyTo: h.parent, Subject: h.mid, Date: h.date, Read: h.mid != "a@x"}, h.label, uint32(i+1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tx.Commit()
+	a, c, d := idOf(t, s, "a@x"), idOf(t, s, "c@x"), idOf(t, s, "d@x")
+	if n := count(s, `SELECT count(DISTINCT thread) FROM messages`); n != 2 {
+		t.Fatalf("%d threads, want 2", n)
+	}
+	rows, err := s.List(Query{Label: "INBOX", Threads: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ""
+	for _, m := range rows {
+		got += fmt.Sprintf("%s count=%d read=%v; ", m.Subject, m.Count, m.Read)
+	}
+	// a, b, c outside Trash; the newest Inbox message (d, then c) stands for each.
+	if want := "d@x count=1 read=true; c@x count=3 read=false; "; got != want {
+		t.Errorf("grouped Inbox:\n%s\nwant\n%s", got, want)
+	}
+	if l, _ := s.List(Query{Label: "INBOX"}); len(l) != 3 {
+		t.Errorf("ungrouped Inbox has %d rows, want 3", len(l))
+	}
+	th, _ := s.Thread(c)
+	if len(th) != 3 || th[0].ID != a || th[2].ID != c {
+		t.Errorf("thread of c: %+v", th)
+	}
+	if ids, _ := s.ThreadMembers([]int64{c}, "INBOX"); fmt.Sprint(ids) != fmt.Sprint([]int64{c, a}) {
+		t.Errorf("Inbox members of c's thread: %v", ids)
+	}
+	if ids, _ := s.ThreadMembers([]int64{d}, ""); fmt.Sprint(ids) != fmt.Sprint([]int64{d}) {
+		t.Errorf("members of d's thread: %v", ids)
+	}
+	b := idOf(t, s, "b@x") // opened from the conversation, but in Sent
+	if ids, _ := s.ThreadMembers([]int64{b}, "INBOX"); fmt.Sprint(ids) != fmt.Sprint([]int64{c, a}) {
+		t.Errorf("Inbox members of b's thread: %v", ids)
+	}
+}
+
+// TestSnooze: a snoozed message leaves the Inbox, stays recorded until its
+// time, then comes back; Undo's Unsnooze forgets it.
+func TestSnooze(t *testing.T) {
+	f, s, a := mailbox(t)
+	m0, m1 := idOf(t, s, "m0@x"), idOf(t, s, "m1@x")
+	if _, err := a.Snooze([]int64{m0}, time.Now().Unix()-1); err == nil {
+		t.Error("snoozed into the past")
+	}
+	until := time.Now().Add(time.Hour).Unix()
+	if _, err := a.Snooze([]int64{m0, m1}, until); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.sizes("INBOX", "All Mail"); got != "INBOX=1 All Mail=2 " {
+		t.Errorf("server after snooze: %s", got)
+	}
+	if c, _ := loadConfig(a.dir, false); c.Snoozed["m0@x"] != until {
+		t.Errorf("snooze not saved: %v", c.Snoozed)
+	}
+	a.Unsnooze([]int64{m1})
+	if err := a.wake(until - 1); err != nil || f.size("INBOX") != 1 {
+		t.Fatalf("woke early: %v, %s", err, f.sizes("INBOX"))
+	}
+	if err := a.wake(until); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.sizes("INBOX", "All Mail"); got != "INBOX=2 All Mail=2 " {
+		t.Errorf("server after wake: %s", got)
+	}
+	if len(a.config().Snoozed) != 0 {
+		t.Errorf("snoozes left: %v", a.config().Snoozed)
+	}
+}

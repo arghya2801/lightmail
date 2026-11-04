@@ -1,9 +1,10 @@
 <script>
-  import { onMount, untrack } from 'svelte'
+  import { onMount, tick, untrack } from 'svelte'
   import { SvelteSet } from 'svelte/reactivity'
   import {
     GetConfig, GetSyncStatus, Folders, Senders, List, Open, AllowImages, SetFlags, SaveEmail, SaveAttachment, OpenAttachment, Sync, SetAppearance, SetReaderZoom,
     Archive, Trash, Spam, Move, AddLabel, DeleteForever, Undo, CreateLabel, RenameLabel, DeleteLabel,
+    Thread, ThreadMembers, Snooze, Unsnooze, Unsubscribe,
   } from '../wailsjs/go/main/App'
   import { EventsOn, WindowSetTitle } from '../wailsjs/runtime/runtime'
   import Reader from './Reader.svelte'
@@ -14,13 +15,16 @@
   import { selectMessage } from './selection.js'
 
   let view = $state('reader') // reader | settings
-  let q = $state({ label: '', sender: '', search: '', sort: stored('sort', 'date:desc') })
+  let q = $state({ label: '', sender: '', search: '', sort: stored('sort', 'date:desc'), threads: stored('threads', false) })
   let items = $state([])
   let more = $state(true)
   let folders = $state([]) // every server folder, with local counts
   let senders = $state([])
   let senderFilter = $state('')
   let msg = $state(null) // the open message
+  let thread = $state([]) // the open message's conversation, oldest first
+  let snoozing = $state(false) // the Snooze dialog is open
+  let snoozeAt = $state('') // its date and time field
   const selected = new SvelteSet() // ids picked with Ctrl/Shift+click, the checkbox or x
   let anchor = null // last picked row, for Shift+click ranges
   let picker = $state(null) // 'move' | 'label' while the folder picker is open
@@ -107,17 +111,34 @@
   const hidden = new Map()
   let loads = 0
   let shown = 0
+  // keepScroll reloads as many rows as are shown, so the list doesn't shrink under the reader.
   async function load(reset, keepScroll) {
     const n = ++loads
-    let page = (await List({ ...q, label: from, offset: reset ? 0 : items.length })) ?? []
+    const limit = reset && keepScroll ? Math.max(100, items.length) : 100
+    let page = (await List({ ...q, label: from, offset: reset ? 0 : items.length, limit })) ?? []
     if (n < shown) return // a newer load already landed
     shown = n
+    more = page.length === limit
     page = page.filter((m) => !hidden.has(m.id) || (hidden.get(m.id) !== null && n > hidden.get(m.id)))
     for (const [id, last] of hidden) if (last !== null && n > last) hidden.delete(id)
     items = reset ? page : [...items, ...page]
-    more = page.length === 100
-    if (reset && !keepScroll && listEl) listEl.scrollTop = 0
+    if (reset && !keepScroll) reveal('center')
   }
+
+  // Scroll the open message's row into view (in conversations, its conversation's
+  // row), or to the top when it isn't listed.
+  async function reveal(block = 'nearest') {
+    await tick()
+    if (!listEl) return
+    const id = items.some((m) => m.id === msg?.id) ? msg.id : items.find((m) => thread.some((t) => t.id === m.id))?.id
+    const row = id && listEl.querySelector(`[data-id="${id}"]`)
+    row ? row.scrollIntoView({ block }) : (listEl.scrollTop = 0)
+  }
+  // A new layout or density moves rows, and coming back from Settings rebuilds the list.
+  $effect(() => {
+    look.layout, look.density, view
+    untrack(() => view === 'reader' && reveal('center'))
+  })
 
   let chosen = false
   async function counts() {
@@ -136,7 +157,7 @@
   // Reload the list when any filter changes; search is debounced.
   let timer
   $effect(() => {
-    const { label, sender, search, sort } = q
+    const { label, sender, search, sort, threads } = q
     untrack(() => {
       selected.clear() // rows the new filter hides mustn't stay picked
       anchor = null
@@ -195,6 +216,14 @@
     if (!(await leave())) return
     view = 'reader'
     msg = { ...$state.snapshot(m), html: '', labels: [], loading: true }
+    if (!thread.some((t) => t.id === m.id)) thread = []
+    Thread(m.id).then((t) => {
+      if (msg?.id !== m.id) return
+      thread = t ?? []
+      // A grouped row opens the whole conversation, so all of it counts as read.
+      const unread = thread.filter((t) => !t.read && t.id !== m.id).map((t) => t.id)
+      if (q.threads && unread.length) SetFlags(unread, '\\Seen', true).then(() => { thread = thread.map((t) => ({ ...t, read: true })); counts() })
+    })
     let full
     try {
       full = await Open(m.id, false)
@@ -255,18 +284,34 @@
     }
   }
 
+  const when = (t) => new Date(t * 1000).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
   const done = {
     archive: () => 'Archived', trash: () => 'Moved to Trash', spam: () => 'Marked as spam', notspam: () => 'Moved to Inbox',
     move: (to) => `Moved to ${label(to)}`, label: (to) => `Added label ${label(to)}`, forever: () => 'Deleted forever',
+    snooze: (t) => `Snoozed until ${when(t)}`,
   }
 
   const failed = {
     archive: () => 'archive', trash: () => 'delete', spam: () => 'mark as spam', notspam: () => 'move to Inbox',
     move: (to) => `move to ${label(to)}`, label: (to) => `add label ${label(to)}`, forever: () => 'delete forever',
+    snooze: () => 'snooze',
+  }
+
+  // Grouped rows act on their whole conversation: its messages in the folder
+  // being viewed (scope ''), or anywhere outside Trash and Spam.
+  async function widen(ids, scope = from) {
+    if (!q.threads || !ids.length) return ids
+    const all = (await ThreadMembers(ids, scope)) ?? []
+    return all.length ? all : ids
   }
 
   async function act(kind, to = '', ids = targets()) {
     if (!ids.length) return
+    try {
+      ids = await widen(ids, kind === 'label' ? '' : from)
+    } catch (e) {
+      return fail(`Couldn't ${failed[kind](to)}. ${e}`)
+    }
     const n = ids.length
     if (kind === 'forever' && !(await ask(`Delete ${n === 1 ? 'this message' : `${n} messages`} forever? This can't be undone.`, 'Delete forever'))) return
     const src = from
@@ -284,6 +329,7 @@
       else if (kind === 'move') moved = await Move(ids, src, to)
       else if (kind === 'label') moved = await AddLabel(ids, to)
       else if (kind === 'forever') await DeleteForever(ids, src)
+      else if (kind === 'snooze') moved = await Snooze(ids, to)
     } catch (e) {
       finished()
       fail(`Couldn't ${failed[kind](to)}. ${e}`)
@@ -296,6 +342,7 @@
     flash(`${done[kind](to)}${n > 1 ? `: ${n} messages` : ''}.`, undo && 'Undo (z)', async () => {
       try {
         await Undo(moved)
+        if (kind === 'snooze') await Unsnooze(ids)
       } catch (e) {
         fail("Couldn't undo. " + e)
       }
@@ -305,11 +352,12 @@
   }
 
   async function flag(flag, key, value) {
-    const ids = targets()
+    let ids = targets()
     if (!ids.length) return
     const rows = rowsOf(ids)
     value ??= rows.some((m) => !m[key])
     try {
+      if (key === 'read' || !value) ids = await widen(ids, '') // a star goes on the one message, as in Gmail
       await SetFlags(ids, flag, value)
     } catch (e) {
       return fail(`Couldn't ${key === 'read' ? (value ? 'mark read' : 'mark unread') : value ? 'star' : 'unstar'}. ${e}`)
@@ -322,7 +370,7 @@
   const setStar = (value) => flag('\\Flagged', 'flagged', value)
   async function star(m) {
     try {
-      await SetFlags([m.id], '\\Flagged', !m.flagged)
+      await SetFlags(m.flagged ? await widen([m.id], '') : [m.id], '\\Flagged', !m.flagged)
     } catch (e) {
       return fail(`Couldn't ${m.flagged ? 'unstar' : 'star'}. ${e}`)
     }
@@ -354,6 +402,40 @@
     }
   }
 
+  async function unsubscribe() {
+    const m = msg
+    const who = m.fromName || m.fromAddr
+    if (m.oneClick && !(await ask(`Unsubscribe from ${who}? Lightmail sends the request for you.`, 'Unsubscribe'))) return
+    try {
+      flash((await Unsubscribe(m.id)) ? `Asked ${who} to unsubscribe you.` : 'Opened the unsubscribe link; finish there.')
+    } catch (e) {
+      fail("Couldn't unsubscribe. " + e)
+    }
+  }
+
+  // Snooze presets, as Unix seconds: later today, tomorrow, the weekend and next week, at Gmail's times.
+  function presets() {
+    const at = (days, hour) => {
+      const d = new Date()
+      d.setDate(d.getDate() + days)
+      d.setHours(hour, 0, 0, 0)
+      return Math.floor(d / 1000)
+    }
+    const day = new Date().getDay()
+    return [
+      at(0, 18) > Date.now() / 1000 + 3600 && ['Later today', at(0, 18)],
+      ['Tomorrow', at(1, 8)],
+      day >= 1 && day <= 4 && ['This weekend', at(6 - day, 8)],
+      ['Next week', at((8 - day) % 7 || 7, 8)],
+    ].filter(Boolean)
+  }
+  function snoozed(e) {
+    const v = e.currentTarget.returnValue
+    snoozing = false
+    const t = v === 'custom' ? Math.floor(new Date(snoozeAt) / 1000) : +v
+    if (t) act('snooze', t)
+  }
+
   async function attachment(i, open) {
     try {
       if (open) return await OpenAttachment(msg.id, i)
@@ -368,6 +450,11 @@
   const archive = () => role !== 'trash' && role !== 'junk' && role !== 'all' && act('archive')
   const remove = () => act(role === 'trash' || role === 'junk' ? 'forever' : 'trash')
   const spam = () => act(role === 'junk' ? 'notspam' : 'spam')
+  const snooze = () => role === 'inbox' && targets().length && ((snoozeAt = ''), (snoozing = true)) // Inbox only: snoozed mail comes back to the Inbox
+  function setThreads(v) {
+    q.threads = v
+    try { localStorage.setItem('threads', JSON.stringify(v)) } catch {}
+  }
 
   let actions = $derived.by(() => {
     const rows = rowsOf(selected.size ? [...selected] : msg ? [msg.id] : [])
@@ -376,6 +463,7 @@
     else if (role === 'junk') a.push(['Not spam', '!', spam], ['Delete forever', '#', remove])
     else {
       if (role !== 'all') a.push(['Archive', 'e', archive])
+      if (role === 'inbox') a.push(['Snooze…', 'b', snooze])
       a.push(['Delete', '#', remove], ['Spam', '!', spam])
     }
     a.push(
@@ -538,6 +626,8 @@
       c: () => targets().length && (picker = 'label'),
       t: () => setRead(),
       T: () => setLook({ layout: look.layout === 'table' ? 'cards' : 'table' }),
+      C: () => setThreads(!q.threads),
+      b: snooze,
       z: () => toast?.action && (toast.fn(), (toast = null)),
       s: () => setStar(),
       I: () => setRead(true),
@@ -558,11 +648,11 @@
   // The ? sheet. Keep in step with the README table.
   const keyHelp = [
     ['f / j', 'Next message'], ['d / k', 'Previous message'], ['Space / Shift+Space', 'Page through the message, then open the next'],
-    ['e', 'Archive'], ['# / Delete', 'Delete (in Trash or Spam: delete forever)'], ['!', 'Report spam (in Spam: not spam)'],
+    ['e', 'Archive'], ['b', 'Snooze (in the Inbox)'], ['# / Delete', 'Delete (in Trash or Spam: delete forever)'], ['!', 'Report spam (in Spam: not spam)'],
     ['z', 'Undo, while its toast is showing'], ['v', 'Move to…'], ['c / l', 'Add label…'], ['s', 'Star or unstar'],
     ['t', 'Mark read or unread'], ['Shift+I / Shift+U', 'Mark read / unread'], ['x', 'Select the open message'], ['Ctrl+A / Esc', 'Select all loaded messages / clear the selection'], ['Ctrl+click / Shift+click', 'Select one more / a range'],
     ['Ctrl+F / /', 'Search all mail'], ['g 1 … g 9', 'Open the nth folder in the sidebar'], ['g f / g l', 'Go to any folder or label'],
-    ['g i', 'Inbox'], ['g s', 'Settings'], ['Shift+T', 'Switch between Cards and Table'], ['r', 'Sync now'],
+    ['g i', 'Inbox'], ['g s', 'Settings'], ['Shift+T', 'Switch between Cards and Table'], ['Shift+C', 'Group conversations or list every message'], ['r', 'Sync now'],
     ['Shift+S', 'Save the message as HTML'], ['Ctrl+Plus / Minus / 0', 'Zoom the message'], ['Ctrl+Shift+Plus / Minus / 0', 'Zoom the whole app'],
     ['Click / Shift+click a heading', 'Sort by that column / add it as another level'], ['Right-click or Menu key on a label', 'Rename, delete or create a label inside it'],
   ]
@@ -691,6 +781,10 @@
       {/if}
       <div class="tools">
         <input type="search" placeholder="Search all mail" aria-label="Search all mail" bind:this={searchEl} bind:value={q.search} />
+        <button class="threads" class:on={q.threads} aria-pressed={q.threads} title="Group conversations (Shift+C)" aria-label="Group conversations"
+          onclick={() => setThreads(!q.threads)}>
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M1.5 3h10M1.5 6h10M4.5 10h10M4.5 13h10" stroke="currentColor" stroke-width="1.3" fill="none" /></svg>
+        </button>
         <div class="layout" role="radiogroup" aria-label="Layout">
           {#each [['cards', 'Cards beside the message', 'M2 3h12M2 6h8M2 10h12M2 13h8'], ['table', 'Table above the message', 'M1.5 3h13M1.5 6.5h13M1.5 10h13M1.5 13.5h13M5.5 1.5v13']] as [v, text, d]}
             <button role="radio" aria-checked={look.layout === v} aria-label={text} title={text} class:on={look.layout === v}
@@ -735,7 +829,7 @@
       </div>
     {:else if msg}
       {#key `${msg.id}:${msg.blocked}:${msg.loading}`}
-        <Reader {msg} {onkey} zoom={readerZoom} onzoom={zoomReader}
+        <Reader {msg} {onkey} zoom={readerZoom} onzoom={zoomReader} {thread} onthread={open} onunsubscribe={unsubscribe}
           {actions} onsave={save} onattach={attachment} onimages={loadImages} onerror={fail}
           chips={(msg.labels ?? []).filter((l) => l !== from).map(label)} />
       {/key}
@@ -776,6 +870,24 @@
         <div class="buttons">
           <button type="button" onclick={(e) => e.currentTarget.closest('dialog').close()}>Cancel</button>
           <button class="primary" value="ok">{question.ok}</button>
+        </div>
+      </form>
+    </dialog>
+  {/if}
+
+  {#if snoozing}
+    <!-- Every button submits; its value is the wake time, or "custom" for the field. -->
+    <dialog class="ask" use:modal onclose={snoozed} aria-label="Snooze">
+      <form method="dialog">
+        <p>Snooze until</p>
+        <div class="presets">
+          {#each presets() as [text, t]}<button value={t}><span>{text}</span><span class="muted">{when(t)}</span></button>{/each}
+        </div>
+        <label class="pick-time">Pick a date and time <input type="datetime-local" bind:value={snoozeAt} /></label>
+        <p class="muted hint">Lightmail must be running for snoozed mail to come back; if it's closed, the mail returns when you next open it.</p>
+        <div class="buttons">
+          <button type="button" onclick={(e) => e.currentTarget.closest('dialog').close()}>Cancel</button>
+          <button class="primary" value="custom" disabled={!snoozeAt}>Snooze</button>
         </div>
       </form>
     </dialog>
@@ -856,7 +968,12 @@
   .tools input { flex: 1; min-width: 0; }
   .layout { display: flex; flex: none; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); }
   .layout button { display: grid; place-items: center; padding: 0 6px; border-radius: 0; color: var(--muted); }
-  .layout button.on { background: var(--picked); color: var(--focus); }
+  .layout button.on, .threads.on { background: var(--picked); color: var(--focus); }
+  .threads { display: grid; place-items: center; flex: none; padding: 0 6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); color: var(--muted); }
+  .presets { display: flex; flex-direction: column; margin: 0 -8px; }
+  .presets button { display: flex; justify-content: space-between; gap: 16px; text-align: left; }
+  .pick-time { display: flex; flex-direction: column; gap: 4px; }
+  .hint { font-size: 12px; }
 
   .main { overflow-y: auto; min-height: 0; min-width: 0; scrollbar-gutter: stable; } /* fixed width while a message is measured */
   .empty { padding: 32px 24px; }

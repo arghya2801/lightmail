@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -60,6 +61,7 @@ func (a *App) startup(ctx context.Context) {
 		os.RemoveAll(openDir()) // files still open in a viewer stay until next time
 	}()
 	go a.watchInbox()
+	go a.wakeSnoozed()
 	go func() {
 		for {
 			a.Sync()
@@ -92,6 +94,7 @@ func (a *App) SaveConfig(c Config) error {
 	}
 	a.mu.Lock()
 	c.PasswordError = ""
+	c.Snoozed = a.cfg.Snoozed // Settings holds a copy from when it opened
 	if err := saveConfig(a.dir, c); err != nil {
 		a.mu.Unlock()
 		return err
@@ -410,6 +413,10 @@ func (a *App) Folders() ([]Folder, error) {
 
 func (a *App) Senders(label string) ([]Count, error) { return a.store.Senders(label) }
 func (a *App) List(q Query) ([]Msg, error)           { return a.store.List(q) }
+func (a *App) Thread(id int64) ([]Msg, error)        { return a.store.Thread(id) }
+func (a *App) ThreadMembers(ids []int64, label string) ([]int64, error) {
+	return a.store.ThreadMembers(ids, label)
+}
 
 // SetFlag sets read (`\Seen`) or starred (`\Flagged`) here, then on the server.
 func (a *App) SetFlag(id int64, flag string, value bool) error {
@@ -464,6 +471,7 @@ func (a *App) Open(id int64, images bool) (Msg, error) {
 	m.HTML = rewrite(p.HTML, src, m.ImagesAllowed)
 	m.Attachments = p.Attachments
 	m.ToAddrs, m.CcAddrs = p.ToAddrs, p.CcAddrs
+	m.Unsubscribe, m.OneClick = p.Unsubscribe, p.OneClick
 	if m.Labels, err = a.store.labelsOf(id); err != nil {
 		return m, err
 	}
@@ -487,6 +495,159 @@ func (a *App) AllowImages(sender string) error {
 	}
 	a.cfg = c
 	return nil
+}
+
+// Unsubscribe follows message id's List-Unsubscribe header. When the sender
+// takes one-click requests it sends one and returns true; otherwise it opens
+// the unsubscribe page, or a mail link in the default mail app, and returns false.
+func (a *App) Unsubscribe(id int64) (bool, error) {
+	raw, err := a.raw(id)
+	if err != nil {
+		return false, err
+	}
+	p, err := parseMsg(raw)
+	if err != nil {
+		return false, err
+	}
+	if p.Unsubscribe == "" {
+		return false, errors.New("this message has no unsubscribe link")
+	}
+	if !p.OneClick {
+		return false, a.OpenLink(p.Unsubscribe)
+	}
+	return true, oneClickUnsubscribe(p.Unsubscribe)
+}
+
+// Snooze archives Inbox messages and returns them to the Inbox at until (Unix
+// seconds). Lightmail has to be running then; one that was closed wakes them at its next start.
+func (a *App) Snooze(ids []int64, until int64) ([]Moved, error) {
+	if until <= time.Now().Unix() {
+		return nil, errors.New("pick a time in the future")
+	}
+	mids, err := a.messageIDs(ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, mid := range mids {
+		if strings.HasPrefix(mid, "nomsgid-") {
+			return nil, errors.New("a message without a Message-ID header can't be snoozed")
+		}
+	}
+	// Recorded first: an archived message with no snooze would never come back.
+	if err := a.editSnoozed(func(s map[string]int64) {
+		for _, mid := range mids {
+			s[mid] = until
+		}
+	}); err != nil {
+		return nil, err
+	}
+	moved, err := a.Archive(ids, "")
+	if err != nil {
+		a.Unsnooze(ids)
+	}
+	return moved, err
+}
+
+// Unsnooze forgets ids' snoozes, for Undo. It leaves the messages where they are.
+func (a *App) Unsnooze(ids []int64) error {
+	mids, err := a.messageIDs(ids)
+	if err != nil {
+		return err
+	}
+	return a.editSnoozed(func(s map[string]int64) {
+		for _, mid := range mids {
+			delete(s, mid)
+		}
+	})
+}
+
+func (a *App) messageIDs(ids []int64) ([]string, error) {
+	var out []string
+	for _, id := range ids {
+		var mid string
+		if err := a.store.db.QueryRow(`SELECT message_id FROM messages WHERE id=?`, id).Scan(&mid); err != nil {
+			return nil, fmt.Errorf("message %d: %w", id, err)
+		}
+		out = append(out, mid)
+	}
+	return out, nil
+}
+
+func (a *App) editSnoozed(f func(map[string]int64)) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	c := a.cfg
+	c.Snoozed = maps.Clone(c.Snoozed)
+	if c.Snoozed == nil {
+		c.Snoozed = map[string]int64{}
+	}
+	f(c.Snoozed)
+	if a.dir != "" { // tests without a data folder
+		if err := saveConfig(a.dir, c); err != nil {
+			return err
+		}
+	}
+	a.cfg = c
+	return nil
+}
+
+func (a *App) wakeSnoozed() {
+	for {
+		if err := a.wake(time.Now().Unix()); err != nil {
+			log.Printf("snooze: %v", err)
+		}
+		time.Sleep(time.Minute)
+	}
+}
+
+// wake puts messages whose snooze is over back in the Inbox: in Gmail, a copy
+// from All Mail adds the Inbox label. One no longer in All Mail was deleted
+// meanwhile, so its snooze is simply dropped.
+func (a *App) wake(now int64) error {
+	var due []string
+	for mid, t := range a.config().Snoozed {
+		if t <= now {
+			due = append(due, mid)
+		}
+	}
+	if len(due) == 0 {
+		return nil
+	}
+	all, inbox := a.store.roleFolder("all"), a.store.roleFolder("inbox")
+	if all == "" || inbox == "" {
+		return errors.New("waiting for the first sync to find All Mail and the Inbox")
+	}
+	var woke []string
+	err := a.imap(func(ss *session) error {
+		woke = woke[:0]
+		if err := ss.open(all); err != nil {
+			return err
+		}
+		for _, mid := range due {
+			d, err := ss.cl.UIDSearch(&imap.SearchCriteria{Header: []imap.SearchCriteriaHeaderField{{Key: "Message-ID", Value: "<" + mid + ">"}}}, nil).Wait()
+			if err != nil {
+				return err
+			}
+			if uids := d.AllUIDs(); len(uids) > 0 {
+				if _, err := ss.cl.Copy(imap.UIDSetNum(uids...), inbox).Wait(); err != nil {
+					return err
+				}
+			}
+			woke = append(woke, mid)
+		}
+		return nil
+	})
+	if len(woke) > 0 {
+		if err := a.editSnoozed(func(s map[string]int64) {
+			for _, mid := range woke {
+				delete(s, mid)
+			}
+		}); err != nil {
+			return err
+		}
+		go a.Sync()
+	}
+	return err
 }
 
 func externalURL(raw string) (string, error) {

@@ -2,7 +2,9 @@
   import { OpenLink } from '../wailsjs/go/main/App'
 
   // actions: [{ label, key, run }] for this message, built by App so the bulk panel shares them.
-  let { msg, actions, chips, onkey, zoom, onzoom, onsave, onattach, onimages, onerror } = $props()
+  // thread is msg's conversation, oldest first; onthread opens one of its messages.
+  let { msg, actions, chips, onkey, zoom, onzoom, onsave, onattach, onimages, onerror, thread, onthread, onunsubscribe } = $props()
+  const short = (s) => new Date(s * 1000).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
   const brief = (addresses) => addresses.slice(0, 2).join(', ') + (addresses.length > 2 ? ` +${addresses.length - 2}` : '')
 
   const kb = (n) => (n < 1024 * 1024 ? Math.max(1, Math.round(n / 1024)) + ' KB' : (n / 1024 / 1024).toFixed(1) + ' MB')
@@ -84,6 +86,8 @@
     <h1>{msg.subject || '(no subject)'}</h1>
     <p class="by muted">
       <span class="who">{msg.fromName || msg.fromAddr}</span>{#if msg.fromAddr && msg.fromName !== msg.fromAddr}&ensp;&lt;{msg.fromAddr}&gt;{/if}, {date}
+      {#if msg.unsubscribe}<button class="unsub" onclick={onunsubscribe}
+          title={msg.oneClick ? 'Ask the sender to stop sending this mail' : `Open ${msg.unsubscribe.startsWith('mailto:') ? 'an unsubscribe email' : 'the unsubscribe page'}`}>Unsubscribe</button>{/if}
     </p>
     {#if msg.toAddrs?.length || msg.ccAddrs?.length}
       <details class="recipients">
@@ -122,6 +126,15 @@
     </div>
   </header>
 
+  {#if thread?.length > 1}
+    <nav class="thread" aria-label="Conversation, {thread.length} messages">
+      {#each thread as t (t.id)}
+        <button class:on={t.id === msg.id} class:unread={!t.read} aria-current={t.id === msg.id ? 'true' : undefined} onclick={() => t.id !== msg.id && onthread(t)}>
+          <span class="who">{t.fromName || t.fromAddr}</span><span class="muted">{short(t.date)}</span>
+        </button>
+      {/each}
+    </nav>
+  {/if}
   {#if msg.blocked}
     <p class="blocked">
       <span class="muted" title="Remote images can tell the sender when you opened a message.">Remote images are hidden.</span>
@@ -169,6 +182,13 @@
   .right { margin-left: auto; display: flex; align-items: center; gap: 4px; }
   .zoom { font-size: 12px; font-variant-numeric: tabular-nums; }
   .body { position: relative; }
+  .unsub { margin-left: 8px; padding: 0 4px; font-size: 12px; color: inherit; text-decoration: underline; }
+  .thread { display: flex; flex-direction: column; max-height: calc(24vh / var(--scale, 1)); overflow-y: auto; padding: 4px 32px; border-top: 1px solid var(--rule); font-size: 13px; }
+  .thread button { display: flex; justify-content: space-between; gap: 12px; text-align: left; padding: 2px 8px; }
+  .thread .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .thread .muted { flex: none; font-variant-numeric: tabular-nums; }
+  .thread .unread .who { font-weight: 600; }
+  .thread .on { background: var(--picked); }
   .blocked {
     display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; padding: 8px 40px;
     border-top: 1px solid var(--rule); font-size: 13px;

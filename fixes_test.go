@@ -295,6 +295,9 @@ func TestMetadataMigration(t *testing.T) {
 	if count(s, `SELECT count(*) FROM pending_flags`) != 1 || count(s, `SELECT count(*) FROM bodies`) != 1 {
 		t.Fatal("migration lost pending flags or bodies")
 	}
+	if count(s, `SELECT count(*) FROM messages WHERE thread<>id`) != 0 || count(s, `SELECT count(*) FROM label_state WHERE last_uid<>0`) != 0 {
+		t.Fatal("thread migration didn't seed threads or schedule the header refetch")
+	}
 	m, err := s.Get(1)
 	if err != nil || len(m.ToAddrs) != 2 || !strings.Contains(m.ToAddrs[0], "priya@x.com") {
 		t.Fatalf("recipient migration: %+v %v", m, err)
@@ -470,5 +473,65 @@ func TestRecipientDisplay(t *testing.T) {
 	p, err := parseMsg([]byte("To: =?UTF-8?Q?J=C3=B6rg?= <person@example.com>\r\nCc: copy@example.com\r\n\r\nhello"))
 	if err != nil || len(p.ToAddrs) != 1 || p.ToAddrs[0] != want || len(p.CcAddrs) != 1 || p.CcAddrs[0] != "copy@example.com" {
 		t.Fatalf("MIME recipient display: %+v %v", p, err)
+	}
+}
+
+func TestUnsubscribe(t *testing.T) {
+	for _, c := range []struct {
+		list, post, link string
+		oneClick         bool
+	}{
+		{"<mailto:u@x?subject=stop>, <https://x.example/u?id=1>", "List-Unsubscribe=One-Click", "https://x.example/u?id=1", true},
+		{"<https://x.example/u\r\n ?id=1>", "", "https://x.example/u?id=1", false},
+		{"<http://x.example/u>", "List-Unsubscribe=One-Click", "http://x.example/u", false},
+		{"<mailto:u@x>", "", "mailto:u@x", false},
+		{"<javascript:alert(1)>", "", "", false},
+		{"", "", "", false},
+	} {
+		if link, one := unsubscribeLink(c.list, c.post); link != c.link || one != c.oneClick {
+			t.Errorf("%q: %q %v", c.list, link, one)
+		}
+	}
+	old := httpc
+	t.Cleanup(func() { httpc = old })
+	var body string
+	httpc = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		b, _ := io.ReadAll(r.Body)
+		body = r.Method + " " + string(b)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
+	})}
+	if err := oneClickUnsubscribe("https://x.example/u"); err != nil || body != "POST List-Unsubscribe=One-Click" {
+		t.Errorf("one-click: %q %v", body, err)
+	}
+	httpc = old
+	if err := oneClickUnsubscribe("http://127.0.0.1:1/u"); err == nil || !strings.Contains(err.Error(), "private network") {
+		t.Errorf("one-click reached a private address: %v", err)
+	}
+}
+
+// TestImageRewrite covers what real newsletters do: borders mistaken for
+// pixels, responsive images hidden until a media query, CSS backgrounds, and
+// URLs wrapped across lines.
+func TestImageRewrite(t *testing.T) {
+	mark := func(u string) string { return "P(" + u + ")" }
+	page := `<html><head><style>.h{background:#fff url(https://x/s.png) no-repeat}@font-face{src:url(https://x/f.woff)}</style></head><body>` +
+		`<img style="border-width:0; display:block" width="600" height="200" src="https://x/border.png">` +
+		`<img style="width:1px;height:1px" src="https://x/pixel1.gif"><img width="1" src="https://x/pixel2.gif"><img style="width:0" src="https://x/pixel3.gif">` +
+		`<img style="display:none" src="https://x/hidden.png">` +
+		`<table><tr><td background="https://x/bg.png" style="background-image: url('https://x/bg2.png')"></td></tr></table>` +
+		"<img src=\" https://x/wr\napped.png\"></body></html>"
+	out := rewrite(page, mark, true)
+	for _, want := range []string{"P(https://x/border.png)", "P(https://x/s.png)", "url(https://x/f.woff)", "P(https://x/bg.png)", "P(https://x/bg2.png)", "P(https://x/wrapped.png)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %s in\n%s", want, out)
+		}
+	}
+	for _, bad := range []string{"pixel1", "pixel2", "pixel3", "hidden.png"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("kept %s", bad)
+		}
+	}
+	if out := rewrite(strings.Replace(page, "<style>", "<style>@media (max-width:600px){.m{display:block!important}}", 1), mark, true); !strings.Contains(out, "P(https://x/hidden.png)") {
+		t.Error("dropped an image a media query can show")
 	}
 }

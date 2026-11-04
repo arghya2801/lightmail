@@ -102,6 +102,10 @@ export function SetReaderZoom(arg1) {
   return window['go']['main']['App']['SetReaderZoom'](arg1);
 }
 
+export function Snooze(arg1, arg2) {
+  return window['go']['main']['App']['Snooze'](arg1, arg2);
+}
+
 export function Spam(arg1, arg2) {
   return window['go']['main']['App']['Spam'](arg1, arg2);
 }
@@ -110,10 +114,26 @@ export function Sync() {
   return window['go']['main']['App']['Sync']();
 }
 
+export function Thread(arg1) {
+  return window['go']['main']['App']['Thread'](arg1);
+}
+
+export function ThreadMembers(arg1, arg2) {
+  return window['go']['main']['App']['ThreadMembers'](arg1, arg2);
+}
+
 export function Trash(arg1, arg2) {
   return window['go']['main']['App']['Trash'](arg1, arg2);
 }
 
 export function Undo(arg1) {
   return window['go']['main']['App']['Undo'](arg1);
+}
+
+export function Unsnooze(arg1) {
+  return window['go']['main']['App']['Unsnooze'](arg1);
+}
+
+export function Unsubscribe(arg1) {
+  return window['go']['main']['App']['Unsubscribe'](arg1);
 }
